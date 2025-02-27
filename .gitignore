@@ -1,0 +1,14 @@
+# .gitignore
+.env
+firebase-service-account.json
+.idea/
+.vscode/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+tmp/
