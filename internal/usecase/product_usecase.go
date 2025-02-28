@@ -208,3 +208,14 @@ func generateUUID() string {
 	// return uuid.New().String()
 	return "img-" + time.Now().Format("20060102150405-999999999")
 }
+
+func (uc *ProductUseCase) ListBySellerID(ctx context.Context, sellerID, status string, limit, offset int) ([]*entity.Product, int64, error) {
+    // Validate user
+    _, err := uc.userRepo.GetByID(ctx, sellerID)
+    if err != nil {
+        return nil, 0, errors.BadRequest("Invalid seller", err)
+    }
+
+    // Call repository
+    return uc.productRepo.ListBySellerID(ctx, sellerID, status, limit, offset)
+}

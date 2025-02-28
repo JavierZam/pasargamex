@@ -29,15 +29,17 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Initialize context
+	// Inisialisasi context
 	ctx := context.Background()
 
 	// Setup Firebase App
 	var firebaseApp *fbapp.App
+
+	// Gunakan err yang sudah ada tanpa mendeklarasikan ulang
 	if os.Getenv("ENVIRONMENT") == "production" {
 		firebaseApp, err = fbapp.NewApp(ctx, &fbapp.Config{ProjectID: cfg.FirebaseProject})
 	} else {
-		opt := option.WithCredentialsFile("firebase-service-account.json")
+		opt := option.WithCredentialsFile("pasargamex-firebase-adminsdk-fbsvc-9cdda86f4c.json")
 		firebaseApp, err = fbapp.NewApp(ctx, &fbapp.Config{ProjectID: cfg.FirebaseProject}, opt)
 	}
 
@@ -61,6 +63,7 @@ func main() {
 	// Initialize repositories
 	userRepo := repository.NewFirestoreUserRepository(firestoreClient)
 	gameTitleRepo := repository.NewFirestoreGameTitleRepository(firestoreClient)
+	productRepo := repository.NewFirestoreProductRepository(firestoreClient)
 
 	// Initialize Firebase auth client adapter
 	firebaseAuthClient := firebase.NewFirebaseAuthClient(authClient)
@@ -69,9 +72,10 @@ func main() {
 	authUseCase := usecase.NewAuthUseCase(userRepo, firebaseAuthClient)
 	userUseCase := usecase.NewUserUseCase(userRepo, firebaseAuthClient)
 	gameTitleUseCase := usecase.NewGameTitleUseCase(gameTitleRepo)
+	productUseCase := usecase.NewProductUseCase(productRepo, gameTitleRepo, userRepo)
 
 	// Setup handlers
-	handler.Setup(authUseCase, userUseCase, gameTitleUseCase)
+	handler.Setup(authUseCase, userUseCase, gameTitleUseCase, productUseCase)
 
 	// Initialize Echo
 	e := echo.New()
