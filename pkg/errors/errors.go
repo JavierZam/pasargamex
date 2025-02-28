@@ -79,3 +79,13 @@ func Is(err error, code string) bool {
 	}
 	return false
 }
+
+// Forbidden 
+func Forbidden(message string, err error) *AppError {
+    return &AppError{
+        Code:    "FORBIDDEN",
+        Message: message,
+        Status:  http.StatusForbidden, // 403
+        Err:     err,
+    }
+}
