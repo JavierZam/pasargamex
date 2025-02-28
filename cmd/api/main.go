@@ -29,26 +29,27 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Inisialisasi context
+	// Initialize context
 	ctx := context.Background()
+
+	// Verify service account file exists
+	serviceAccountPath := "pasargamex-firebase-adminsdk-fbsvc-2e1876a42a.json"
+	if _, statErr := os.Stat(serviceAccountPath); os.IsNotExist(statErr) {
+		log.Fatalf("Service account file not found: %s", serviceAccountPath)
+	} else {
+		log.Printf("Found service account at: %s", serviceAccountPath)
+	}
 
 	// Setup Firebase App
 	var firebaseApp *fbapp.App
-
-	// Gunakan err yang sudah ada tanpa mendeklarasikan ulang
-	if os.Getenv("ENVIRONMENT") == "production" {
-		firebaseApp, err = fbapp.NewApp(ctx, &fbapp.Config{ProjectID: cfg.FirebaseProject})
-	} else {
-		opt := option.WithCredentialsFile("pasargamex-firebase-adminsdk-fbsvc-9cdda86f4c.json")
-		firebaseApp, err = fbapp.NewApp(ctx, &fbapp.Config{ProjectID: cfg.FirebaseProject}, opt)
-	}
-
+	opt := option.WithCredentialsFile(serviceAccountPath)
+	firebaseApp, err = fbapp.NewApp(ctx, &fbapp.Config{ProjectID: cfg.FirebaseProject}, opt)
 	if err != nil {
 		log.Fatalf("Failed to initialize Firebase: %v", err)
 	}
 
-	// Initialize Firestore
-	firestoreClient, err := firestore.NewClient(ctx, cfg.FirebaseProject)
+	// Initialize Firestore with the same credentials
+	firestoreClient, err := firestore.NewClient(ctx, cfg.FirebaseProject, opt)
 	if err != nil {
 		log.Fatalf("Failed to create Firestore client: %v", err)
 	}
@@ -100,5 +101,6 @@ func main() {
 	router.Setup(e, authMiddleware)
 	
 	// Start server
+	log.Printf("Starting server on port %s...", cfg.ServerPort)
 	e.Logger.Fatal(e.Start(":" + cfg.ServerPort))
 }

@@ -23,7 +23,7 @@ func Load() (*Config, error) {
 		FirebaseProject: getEnv("FIREBASE_PROJECT_ID", ""),
 		Environment:     getEnv("ENVIRONMENT", "development"),
 		JWTSecret:       getEnv("JWT_SECRET", "your-secret-key"),
-		JWTExpiry:       getEnvAsInt64("JWT_EXPIRY", 24*60*60), // 24 hours in seconds
+		JWTExpiry:       getEnvAsInt64("JWT_EXPIRY", 24*60*60), // 24 hours
 	}
 
 	return config, nil
