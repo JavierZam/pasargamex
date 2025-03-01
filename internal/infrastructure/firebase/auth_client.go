@@ -2,19 +2,26 @@ package firebase
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"strings"
+	"time"
 
 	"firebase.google.com/go/v4/auth"
 )
 
 type FirebaseAuthClient struct {
 	client *auth.Client
+	apiKey string // Tambahkan API key Firebase
 }
 
-func NewFirebaseAuthClient(client *auth.Client) *FirebaseAuthClient {
+func NewFirebaseAuthClient(client *auth.Client, apiKey string) *FirebaseAuthClient {
 	return &FirebaseAuthClient{
 		client: client,
+		apiKey: apiKey,
 	}
 }
 
@@ -28,12 +35,9 @@ func (f *FirebaseAuthClient) CreateUser(ctx context.Context, email, password, di
 
     user, err := f.client.CreateUser(ctx, params)
     if err != nil {
-        // Log error type dan detail
         log.Printf("Firebase Auth error type: %T", err)
         log.Printf("Firebase Auth error detail: %v", err)
         
-        // Tidak perlu type assertion ke auth.Error
-        // Cukup log error saja
         return "", err
     }
     
@@ -50,13 +54,124 @@ func (f *FirebaseAuthClient) VerifyToken(ctx context.Context, token string) (str
 	return result.UID, nil
 }
 
+// Fungsi ini tetap ada untuk kompatibilitas dengan kode yang sudah ada
 func (f *FirebaseAuthClient) GenerateToken(ctx context.Context, uid string) (string, error) {
-	token, err := f.client.CustomToken(ctx, uid)
+	customToken, err := f.client.CustomToken(ctx, uid)
 	if err != nil {
 		return "", err
 	}
 	
-	return token, nil
+	// Jika apiKey tersedia, exchange ke ID token
+	if f.apiKey != "" {
+		idToken, err := f.exchangeCustomTokenForIDToken(customToken)
+		if err != nil {
+			log.Printf("Failed to exchange custom token for ID token: %v", err)
+			// Fallback ke custom token jika gagal
+			return customToken, nil
+		}
+		log.Printf("Successfully exchanged custom token for ID token")
+		return idToken, nil
+	}
+	
+	return customToken, nil
+}
+
+// Metode baru untuk exchange custom token ke ID token
+func (f *FirebaseAuthClient) exchangeCustomTokenForIDToken(customToken string) (string, error) {
+	if f.apiKey == "" {
+		return "", fmt.Errorf("Firebase API key is not set")
+	}
+
+	log.Printf("Exchanging custom token for ID token")
+	url := fmt.Sprintf("https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=%s", f.apiKey)
+	
+	// Prepare request body
+	reqBody := fmt.Sprintf(`{"token":"%s","returnSecureToken":true}`, customToken)
+	
+	// Send request
+	req, err := http.NewRequest("POST", url, strings.NewReader(reqBody))
+	if err != nil {
+		return "", err
+	}
+	
+	req.Header.Set("Content-Type", "application/json")
+	
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("firebase auth API error: %s", string(body))
+	}
+	
+	// Parse response
+	var result struct {
+		IDToken string `json:"idToken"`
+	}
+	
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+	
+	return result.IDToken, nil
+}
+
+// Implementasi untuk email/password login langsung
+func (f *FirebaseAuthClient) SignInWithEmailPassword(email, password string) (string, error) {
+	if f.apiKey == "" {
+		return "", fmt.Errorf("Firebase API key is not set")
+	}
+
+	log.Printf("Signing in with email/password for: %s", email)
+	url := fmt.Sprintf("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=%s", f.apiKey)
+	
+	// Prepare request body
+	reqBody := fmt.Sprintf(`{"email":"%s","password":"%s","returnSecureToken":true}`, email, password)
+	
+	// Send request
+	req, err := http.NewRequest("POST", url, strings.NewReader(reqBody))
+	if err != nil {
+		return "", err
+	}
+	
+	req.Header.Set("Content-Type", "application/json")
+	
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("firebase auth API error: %s", string(body))
+	}
+	
+	// Parse response
+	var result struct {
+		IDToken string `json:"idToken"`
+		LocalID string `json:"localId"`
+	}
+	
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+	
+	log.Printf("Successfully signed in user: %s", email)
+	return result.IDToken, nil
 }
 
 func (f *FirebaseAuthClient) UpdateUserPassword(ctx context.Context, uid, newPassword string) error {

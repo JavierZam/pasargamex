@@ -64,7 +64,7 @@ func main() {
 	productRepo := repository.NewFirestoreProductRepository(firestoreClient)
 
 	// Initialize Firebase auth client adapter
-	firebaseAuthClient := firebase.NewFirebaseAuthClient(authClient)
+	firebaseAuthClient := firebase.NewFirebaseAuthClient(authClient, cfg.FirebaseApiKey)
 
 	// Initialize use cases
 	authUseCase := usecase.NewAuthUseCase(userRepo, firebaseAuthClient)

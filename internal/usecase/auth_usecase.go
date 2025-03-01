@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"pasargamex/internal/domain/entity"
@@ -35,56 +34,46 @@ type AuthResult struct {
 }
 
 func (uc *AuthUseCase) Register(ctx context.Context, input RegisterInput) (*AuthResult, error) {
-    log.Printf("Starting registration for email: %s", input.Email)
-    
     // Check if email already exists
     existingUser, err := uc.userRepo.GetByEmail(ctx, input.Email)
-    if err != nil {
-        log.Printf("Error checking existing user: %v", err)
-        // Just log but continue, since this could be "not found" which is expected
-    }
     if err == nil && existingUser != nil {
-        log.Printf("User with email %s already exists", input.Email)
         return nil, errors.BadRequest("Email already in use", nil)
     }
 
-    log.Printf("Attempting to create Firebase Auth user")
     // Create user in Firebase Auth
     uid, err := uc.firebaseAuth.CreateUser(ctx, input.Email, input.Password, input.Username)
     if err != nil {
-        log.Printf("Firebase Auth user creation failed: %v", err)
         return nil, errors.Internal("Failed to create user in authentication provider", err)
     }
-    log.Printf("Firebase Auth user created with UID: %s", uid)
 
-	// Create user in repository
-	now := time.Now()
-	user := &entity.User{
-		ID:        uid,
-		Email:     input.Email,
-		Username:  input.Username,
-		Phone:     input.Phone,
-		Role:      "user",
-		Status:    "active",
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
+    // Create user in repository
+    now := time.Now()
+    user := &entity.User{
+        ID:        uid,
+        Email:     input.Email,
+        Username:  input.Username,
+        Phone:     input.Phone,
+        Role:      "user",
+        Status:    "active",
+        CreatedAt: now,
+        UpdatedAt: now,
+    }
 
-	if err := uc.userRepo.Create(ctx, user); err != nil {
-		// Consider cleanup in Firebase if this fails
-		return nil, errors.Internal("Failed to create user record", err)
-	}
+    if err := uc.userRepo.Create(ctx, user); err != nil {
+        // Consider cleanup in Firebase if this fails
+        return nil, errors.Internal("Failed to create user record", err)
+    }
 
-	// Generate token
-	token, err := uc.firebaseAuth.GenerateToken(ctx, uid)
-	if err != nil {
-		return nil, errors.Internal("Failed to generate authentication token", err)
-	}
+    // Generate ID token directly
+    token, err := uc.firebaseAuth.SignInWithEmailPassword(input.Email, input.Password)
+    if err != nil {
+        return nil, errors.Internal("Failed to generate authentication token", err)
+    }
 
-	return &AuthResult{
-		User:  user,
-		Token: token,
-	}, nil
+    return &AuthResult{
+        User:  user,
+        Token: token,
+    }, nil
 }
 
 func (uc *AuthUseCase) Login(ctx context.Context, email, password string) (*AuthResult, error) {
