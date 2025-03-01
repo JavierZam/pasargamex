@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"pasargamex/internal/usecase"
 	"pasargamex/pkg/response"
 
@@ -24,36 +25,43 @@ type updateProfileRequest struct {
 }
 
 func (h *UserHandler) UpdateProfile(c echo.Context) error {
-	var req updateProfileRequest
-	if err := c.Bind(&req); err != nil {
-		return response.Error(c, err)
-	}
+    var req updateProfileRequest
+    if err := c.Bind(&req); err != nil {
+        log.Printf("Error binding request: %v", err)
+        return response.Error(c, err)
+    }
 
-	if err := c.Validate(&req); err != nil {
-		return response.Error(c, err)
-	}
+    log.Printf("Update profile request: %+v", req)
+    
+    if err := c.Validate(&req); err != nil {
+        log.Printf("Validation error: %v", err)
+        return response.Error(c, err)
+    }
 
-	// Get user ID from context
-	uid := c.Get("uid").(string)
+    // Get user ID from context
+    uid := c.Get("uid").(string)
+    log.Printf("Updating profile for user ID: %s", uid)
+    
+    // Call use case
+    user, err := h.userUseCase.UpdateProfile(c.Request().Context(), uid, usecase.UpdateProfileInput{
+        Username: req.Username,
+        Phone:    req.Phone,
+        Bio:      req.Bio,
+    })
 
-	// Call use case
-	user, err := h.userUseCase.UpdateProfile(c.Request().Context(), uid, usecase.UpdateProfileInput{
-		Username: req.Username,
-		Phone:    req.Phone,
-		Bio:      req.Bio,
-	})
+    if err != nil {
+        log.Printf("Error updating profile: %v", err)
+        return response.Error(c, err)
+    }
 
-	if err != nil {
-		return response.Error(c, err)
-	}
-
-	return response.Success(c, map[string]interface{}{
-		"id":       user.ID,
-		"email":    user.Email,
-		"username": user.Username,
-		"phone":    user.Phone,
-		"bio":      user.Bio,
-	})
+    log.Printf("Profile updated successfully")
+    return response.Success(c, map[string]interface{}{
+        "id":       user.ID,
+        "email":    user.Email,
+        "username": user.Username,
+        "phone":    user.Phone,
+        "bio":      user.Bio,
+    })
 }
 
 func (h *UserHandler) GetProfile(c echo.Context) error {

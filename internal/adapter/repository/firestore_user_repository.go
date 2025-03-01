@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -56,9 +57,27 @@ func (r *firestoreUserRepository) GetByEmail(ctx context.Context, email string) 
 }
 
 func (r *firestoreUserRepository) Update(ctx context.Context, user *entity.User) error {
-	user.UpdatedAt = time.Now()
-	_, err := r.client.Collection("users").Doc(user.ID).Set(ctx, user, firestore.MergeAll)
-	return err
+    log.Printf("Updating user in Firestore, ID: %s", user.ID)
+    
+    // Konversi struct User ke map untuk digunakan dengan MergeAll
+    updateData := map[string]interface{}{
+        "username":  user.Username,
+        "phone":     user.Phone,
+        "bio":       user.Bio,
+        "updatedAt": time.Now(),
+    }
+    
+    log.Printf("Update data: %+v", updateData)
+    
+    _, err := r.client.Collection("users").Doc(user.ID).Set(ctx, updateData, firestore.MergeAll)
+    
+    if err != nil {
+        log.Printf("Firestore update error: %v", err)
+        return err
+    }
+    
+    log.Printf("User updated successfully in Firestore")
+    return nil
 }
 
 func (r *firestoreUserRepository) Delete(ctx context.Context, id string) error {
