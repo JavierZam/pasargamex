@@ -32,12 +32,9 @@ func main() {
 	// Initialize context
 	ctx := context.Background()
 
-	// Verify service account file exists
-	serviceAccountPath := "pasargamex-firebase-adminsdk-fbsvc-2e1876a42a.json"
-	if _, statErr := os.Stat(serviceAccountPath); os.IsNotExist(statErr) {
-		log.Fatalf("Service account file not found: %s", serviceAccountPath)
-	} else {
-		log.Printf("Found service account at: %s", serviceAccountPath)
+	serviceAccountPath := os.Getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
+	if serviceAccountPath == "" {
+		serviceAccountPath = "./pasargamex-firebase-adminsdk-fbsvc-2e1876a42a.json"
 	}
 
 	// Setup Firebase App
@@ -77,6 +74,7 @@ func main() {
 
 	// Setup handlers
 	handler.Setup(authUseCase, userUseCase, gameTitleUseCase, productUseCase)
+	handler.SetupHealthHandler(firebaseAuthClient)
 
 	// Initialize Echo
 	e := echo.New()

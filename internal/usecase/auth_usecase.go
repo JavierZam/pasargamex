@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"pasargamex/internal/domain/entity"
@@ -34,17 +35,27 @@ type AuthResult struct {
 }
 
 func (uc *AuthUseCase) Register(ctx context.Context, input RegisterInput) (*AuthResult, error) {
-	// Check if email already exists
-	existingUser, err := uc.userRepo.GetByEmail(ctx, input.Email)
-	if err == nil && existingUser != nil {
-		return nil, errors.BadRequest("Email already in use", nil)
-	}
+    log.Printf("Starting registration for email: %s", input.Email)
+    
+    // Check if email already exists
+    existingUser, err := uc.userRepo.GetByEmail(ctx, input.Email)
+    if err != nil {
+        log.Printf("Error checking existing user: %v", err)
+        // Just log but continue, since this could be "not found" which is expected
+    }
+    if err == nil && existingUser != nil {
+        log.Printf("User with email %s already exists", input.Email)
+        return nil, errors.BadRequest("Email already in use", nil)
+    }
 
-	// Create user in Firebase Auth
-	uid, err := uc.firebaseAuth.CreateUser(ctx, input.Email, input.Password, input.Username)
-	if err != nil {
-		return nil, errors.Internal("Failed to create user in authentication provider", err)
-	}
+    log.Printf("Attempting to create Firebase Auth user")
+    // Create user in Firebase Auth
+    uid, err := uc.firebaseAuth.CreateUser(ctx, input.Email, input.Password, input.Username)
+    if err != nil {
+        log.Printf("Firebase Auth user creation failed: %v", err)
+        return nil, errors.Internal("Failed to create user in authentication provider", err)
+    }
+    log.Printf("Firebase Auth user created with UID: %s", uid)
 
 	// Create user in repository
 	now := time.Now()
