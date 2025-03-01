@@ -85,19 +85,23 @@ func (uc *GameTitleUseCase) GetGameTitleBySlug(ctx context.Context, slug string)
 }
 
 func (uc *GameTitleUseCase) ListGameTitles(ctx context.Context, status string, page, limit int) ([]*entity.GameTitle, int64, error) {
-	// Prepare filter
-	filter := make(map[string]interface{})
-	if status != "" {
-		filter["status"] = status
-	}
+    // Prepare filter
+    filter := make(map[string]interface{})
+    
+    // Jika status tidak diberikan, set default ke "active"
+    if status == "" {
+        status = "active"
+    }
+    
+    filter["status"] = status
 
-	// Calculate offset
-	offset := (page - 1) * limit
-	if offset < 0 {
-		offset = 0
-	}
+    // Calculate offset
+    offset := (page - 1) * limit
+    if offset < 0 {
+        offset = 0
+    }
 
-	return uc.gameTitleRepo.List(ctx, filter, limit, offset)
+    return uc.gameTitleRepo.List(ctx, filter, limit, offset)
 }
 
 func (uc *GameTitleUseCase) UpdateGameTitle(ctx context.Context, id string, input CreateGameTitleInput) (*entity.GameTitle, error) {

@@ -89,6 +89,7 @@ func main() {
 
 	// Auth middleware
 	authMiddleware := apimiddleware.NewAuthMiddleware(authClient)
+	adminMiddleware := apimiddleware.NewAdminMiddleware(userRepo)
 	
 	// Add health check endpoint
 	e.GET("/health", func(c echo.Context) error {
@@ -96,7 +97,7 @@ func main() {
 	})
 	
 	// Setup routers
-	router.Setup(e, authMiddleware)
+	router.Setup(e, authMiddleware, adminMiddleware)
 	
 	// Start server
 	log.Printf("Starting server on port %s...", cfg.ServerPort)

@@ -124,54 +124,62 @@ func (f *FirebaseAuthClient) exchangeCustomTokenForIDToken(customToken string) (
 	return result.IDToken, nil
 }
 
-// Implementasi untuk email/password login langsung
 func (f *FirebaseAuthClient) SignInWithEmailPassword(email, password string) (string, error) {
-	if f.apiKey == "" {
-		return "", fmt.Errorf("Firebase API key is not set")
-	}
+    if f.apiKey == "" {
+        log.Printf("Firebase API key is not set")
+        return "", fmt.Errorf("Firebase API key is not set")
+    }
 
-	log.Printf("Signing in with email/password for: %s", email)
-	url := fmt.Sprintf("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=%s", f.apiKey)
-	
-	// Prepare request body
-	reqBody := fmt.Sprintf(`{"email":"%s","password":"%s","returnSecureToken":true}`, email, password)
-	
-	// Send request
-	req, err := http.NewRequest("POST", url, strings.NewReader(reqBody))
-	if err != nil {
-		return "", err
-	}
-	
-	req.Header.Set("Content-Type", "application/json")
-	
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("firebase auth API error: %s", string(body))
-	}
-	
-	// Parse response
-	var result struct {
-		IDToken string `json:"idToken"`
-		LocalID string `json:"localId"`
-	}
-	
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", err
-	}
-	
-	log.Printf("Successfully signed in user: %s", email)
-	return result.IDToken, nil
+    log.Printf("Signing in with email/password for: %s", email)
+    url := fmt.Sprintf("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=%s", f.apiKey)
+    
+    // Prepare request body
+    reqBody := fmt.Sprintf(`{"email":"%s","password":"%s","returnSecureToken":true}`, email, password)
+    
+    // Send request
+    req, err := http.NewRequest("POST", url, strings.NewReader(reqBody))
+    if err != nil {
+        log.Printf("Error creating request: %v", err)
+        return "", err
+    }
+    
+    req.Header.Set("Content-Type", "application/json")
+    
+    client := &http.Client{Timeout: 10 * time.Second}
+    resp, err := client.Do(req)
+    if err != nil {
+        log.Printf("Error sending request: %v", err)
+        return "", err
+    }
+    defer resp.Body.Close()
+    
+    body, err := ioutil.ReadAll(resp.Body)
+    if err != nil {
+        log.Printf("Error reading response body: %v", err)
+        return "", err
+    }
+    
+    // Log response status
+    log.Printf("Firebase Auth response status: %d", resp.StatusCode)
+    
+    if resp.StatusCode != http.StatusOK {
+        log.Printf("Firebase auth API error: %s", string(body))
+        return "", fmt.Errorf("firebase auth API error: %s", string(body))
+    }
+    
+    // Parse response
+    var result struct {
+        IDToken string `json:"idToken"`
+        LocalID string `json:"localId"`
+    }
+    
+    if err := json.Unmarshal(body, &result); err != nil {
+        log.Printf("Error parsing response: %v", err)
+        return "", err
+    }
+    
+    log.Printf("Successfully signed in user: %s with ID: %s", email, result.LocalID)
+    return result.IDToken, nil
 }
 
 func (f *FirebaseAuthClient) UpdateUserPassword(ctx context.Context, uid, newPassword string) error {

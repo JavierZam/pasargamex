@@ -170,3 +170,4 @@ func (h *AuthHandler) Logout(c echo.Context) error {
         "message": "Successfully logged out",
     })
 }
+

@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"pasargamex/internal/domain/entity"
@@ -77,26 +78,32 @@ func (uc *AuthUseCase) Register(ctx context.Context, input RegisterInput) (*Auth
 }
 
 func (uc *AuthUseCase) Login(ctx context.Context, email, password string) (*AuthResult, error) {
-	// Note: Firebase Admin SDK doesn't support password sign-in directly
-	// We would need Firebase Auth REST API for this
-	// For now, we'll just mock this with a "successful" login
+    // Gunakan metode login dengan email/password langsung
+    token, err := uc.firebaseAuth.SignInWithEmailPassword(email, password)
+    if err != nil {
+        // Pastikan error dilog dan dikembalikan dengan benar
+        log.Printf("Login failed: %v", err)
+        return nil, errors.Unauthorized("Invalid credentials", err)
+    }
 
-	// Get user by email
-	user, err := uc.userRepo.GetByEmail(ctx, email)
-	if err != nil {
-		return nil, err
-	}
+    // Verify token to get UID
+    uid, err := uc.firebaseAuth.VerifyToken(ctx, token)
+    if err != nil {
+        log.Printf("Token verification failed: %v", err)
+        return nil, errors.Internal("Failed to verify token", err)
+    }
 
-	// Generate token
-	token, err := uc.firebaseAuth.GenerateToken(ctx, user.ID)
-	if err != nil {
-		return nil, err
-	}
+    // Get user data
+    user, err := uc.userRepo.GetByID(ctx, uid)
+    if err != nil {
+        log.Printf("Failed to get user by ID: %v", err)
+        return nil, errors.NotFound("User", err)
+    }
 
-	return &AuthResult{
-		User:  user,
-		Token: token,
-	}, nil
+    return &AuthResult{
+        User:  user,
+        Token: token,
+    }, nil
 }
 
 func (uc *AuthUseCase) GetUserByID(ctx context.Context, id string) (*entity.User, error) {
