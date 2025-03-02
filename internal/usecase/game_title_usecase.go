@@ -21,10 +21,12 @@ func NewGameTitleUseCase(gameTitleRepo repository.GameTitleRepository) *GameTitl
 }
 
 type CreateGameTitleInput struct {
-	Name        string
-	Description string
-	Attributes  []GameTitleAttributeInput
-	Status      string
+    Name        string
+    Description string
+    Icon        string
+    Banner      string
+    Attributes  []GameTitleAttributeInput
+    Status      string
 }
 
 type GameTitleAttributeInput struct {
@@ -58,15 +60,17 @@ func (uc *GameTitleUseCase) CreateGameTitle(ctx context.Context, input CreateGam
 	}
 
 	// Create game title entity
-	gameTitle := &entity.GameTitle{
-		Name:        input.Name,
-		Slug:        slug,
-		Description: input.Description,
-		Attributes:  attributes,
-		Status:      input.Status,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
+    gameTitle := &entity.GameTitle{
+        Name:        input.Name,
+        Slug:        slug,
+        Description: input.Description,
+        Icon:        input.Icon,
+        Banner:      input.Banner,
+        Attributes:  attributes,
+        Status:      input.Status,
+        CreatedAt:   time.Now(),
+        UpdatedAt:   time.Now(),
+    }
 
 	// Save to repository
 	if err := uc.gameTitleRepo.Create(ctx, gameTitle); err != nil {
@@ -112,9 +116,11 @@ func (uc *GameTitleUseCase) UpdateGameTitle(ctx context.Context, id string, inpu
 	}
 
 	// Update fields
-	gameTitle.Name = input.Name
-	gameTitle.Description = input.Description
-	gameTitle.Status = input.Status
+    gameTitle.Name = input.Name
+    gameTitle.Description = input.Description
+    gameTitle.Icon = input.Icon
+    gameTitle.Banner = input.Banner
+    gameTitle.Status = input.Status
 	
 	// Convert attributes
 	attributes := make([]entity.GameTitleAttribute, len(input.Attributes))

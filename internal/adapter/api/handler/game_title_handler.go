@@ -27,10 +27,12 @@ type gameTitleAttributeRequest struct {
 }
 
 type createGameTitleRequest struct {
-	Name        string                    `json:"name" validate:"required"`
-	Description string                    `json:"description"`
-	Attributes  []gameTitleAttributeRequest `json:"attributes"`
-	Status      string                    `json:"status" validate:"required,oneof=active inactive"`
+    Name        string                     `json:"name" validate:"required"`
+    Description string                     `json:"description"`
+    Icon        string                     `json:"icon" validate:"omitempty,url"`
+    Banner      string                     `json:"banner" validate:"omitempty,url"`
+    Attributes  []gameTitleAttributeRequest `json:"attributes"`
+    Status      string                     `json:"status" validate:"required,oneof=active inactive"`
 }
 
 func (h *GameTitleHandler) CreateGameTitle(c echo.Context) error {
@@ -58,6 +60,8 @@ func (h *GameTitleHandler) CreateGameTitle(c echo.Context) error {
 	gameTitle, err := h.gameTitleUseCase.CreateGameTitle(c.Request().Context(), usecase.CreateGameTitleInput{
 		Name:        req.Name,
 		Description: req.Description,
+		Icon:        req.Icon,
+		Banner:      req.Banner,
 		Attributes:  attributes,
 		Status:      req.Status,
 	})
@@ -134,6 +138,8 @@ func (h *GameTitleHandler) UpdateGameTitle(c echo.Context) error {
 	gameTitle, err := h.gameTitleUseCase.UpdateGameTitle(c.Request().Context(), id, usecase.CreateGameTitleInput{
 		Name:        req.Name,
 		Description: req.Description,
+		Icon:        req.Icon,      
+		Banner:      req.Banner,     
 		Attributes:  attributes,
 		Status:      req.Status,
 	})
