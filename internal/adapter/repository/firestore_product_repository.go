@@ -2,10 +2,13 @@ package repository
 
 import (
 	"context"
+	"log"
+	"slices"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/google/uuid"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -26,27 +29,26 @@ func NewFirestoreProductRepository(client *firestore.Client) repository.ProductR
 }
 
 func (r *firestoreProductRepository) Create(ctx context.Context, product *entity.Product) error {
-	// Generate ID if not provided
-	if product.ID == "" {
-		doc := r.client.Collection("products").NewDoc()
-		product.ID = doc.ID
-	}
-
-	// Set timestamps
-	now := time.Now()
-	if product.CreatedAt.IsZero() {
-		product.CreatedAt = now
-	}
-	product.UpdatedAt = now
+    // Generate ID jika belum ada
+    if product.ID == "" {
+        product.ID = uuid.New().String()
+    }
+    
+    // Set timestamps
+    now := time.Now()
+    product.CreatedAt = now
+    product.UpdatedAt = now
+    
+    // Inisialisasi bumpedAt ke waktu pembuatan
     product.BumpedAt = now
-
-	// Save to Firestore
-	_, err := r.client.Collection("products").Doc(product.ID).Set(ctx, product)
-	if err != nil {
-		return errors.Internal("Failed to create product", err)
-	}
-
-	return nil
+    
+    // Simpan ke Firestore
+    _, err := r.client.Collection("products").Doc(product.ID).Set(ctx, product)
+    if err != nil {
+        return errors.Internal("Failed to create product", err)
+    }
+    
+    return nil
 }
 
 func (r *firestoreProductRepository) GetByID(ctx context.Context, id string) (*entity.Product, error) {
@@ -66,72 +68,98 @@ func (r *firestoreProductRepository) GetByID(ctx context.Context, id string) (*e
 	return &product, nil
 }
 
-func (r *firestoreProductRepository) List(ctx context.Context, filter map[string]interface{}, sort string, limit, offset int) ([]*entity.Product, int64, error) {
-    // Inisialisasi query
-    query := r.client.Collection("products").Query
+func (r *firestoreProductRepository) List(ctx context.Context, filter map[string]interface{}, sortType string, limit, offset int) ([]*entity.Product, int64, error) {
+    log.Printf("Listing products with filter: %v, sort: %s", filter, sortType)
     
-    // Add default filter to exclude soft deleted
-    if filter == nil {
-        filter = make(map[string]interface{})
-    }
-   
+    // Base query
+    collection := r.client.Collection("products")
+    var query firestore.Query = collection.Query
+    
     // Apply filters
     for key, value := range filter {
         query = query.Where(key, "==", value)
     }
     
-    // Apply default filter to exclude deleted products
-    query = query.Where("deletedAt", "==", nil)
+    // Don't exclude deleted for debug
+    // query = query.Where("deletedAt", "==", nil)
     
-    // Apply sorting
-    if sort != "" {
-        parts := strings.Split(sort, "_")
-        field := parts[0]
-        order := firestore.Asc
-        if len(parts) > 1 && parts[1] == "desc" {
-            order = firestore.Desc
-        }
-        query = query.OrderBy(field, order)
-    } else {
-        // Default sort - changed from createdAt to bumpedAt
-        query = query.OrderBy("bumpedAt", firestore.Desc)
-    }
-    
-    // Get total count - gunakan query yang sudah dibuat, bukan allQuery baru
-    allDocs, err := query.Documents(ctx).GetAll()
+    // Get all documents first
+    docs, err := query.Documents(ctx).GetAll()
     if err != nil {
-        return nil, 0, errors.Internal("Failed to count products", err)
-    }
-    total := int64(len(allDocs))
-    
-    // Apply pagination
-    if limit > 0 {
-        query = query.Limit(limit)
-    }
-    if offset > 0 {
-        query = query.Offset(offset)
+        log.Printf("Error getting products: %v", err)
+        return nil, 0, errors.Internal("Failed to get products", err)
     }
     
-    // Execute query
-    iter := query.Documents(ctx)
-    var products []*entity.Product
+    log.Printf("Found %d documents in Firestore", len(docs))
     
-    for {
-        doc, err := iter.Next()
-        if err == iterator.Done {
-            break
-        }
-        if err != nil {
-            return nil, 0, errors.Internal("Failed to iterate products", err)
-        }
+    // Parse products dari documents
+    var allProducts []*entity.Product
+    for _, doc := range docs {
         var product entity.Product
         if err := doc.DataTo(&product); err != nil {
-            return nil, 0, errors.Internal("Failed to parse product data", err)
+            log.Printf("Error parsing product: %v", err)
+            continue // Skip products that fail to parse
         }
-        products = append(products, &product)
+        
+        // Ensure ID is set
+        product.ID = doc.Ref.ID
+        
+        // Set bumpedAt if not exists
+        if product.BumpedAt.IsZero() {
+            product.BumpedAt = product.CreatedAt
+        }
+        
+        allProducts = append(allProducts, &product)
+    }
+
+    if sortType == "price_asc" {
+        // Sort by price ascending
+        slices.SortFunc(allProducts, func(a, b *entity.Product) int {
+            if a.Price < b.Price {
+                return -1
+            } else if a.Price > b.Price {
+                return 1
+            }
+            return 0
+        })
+    } else if sortType == "price_desc" {
+        // Sort by price descending
+        slices.SortFunc(allProducts, func(a, b *entity.Product) int {
+            if a.Price > b.Price {
+                return -1
+            } else if a.Price < b.Price {
+                return 1
+            }
+            return 0
+        })
+    } else {
+        // Default to bumpedAt desc
+        slices.SortFunc(allProducts, func(a, b *entity.Product) int {
+            if a.BumpedAt.After(b.BumpedAt) {
+                return -1
+            } else if a.BumpedAt.Before(b.BumpedAt) {
+                return 1
+            }
+            return 0
+        })
     }
     
-    return products, total, nil
+    // Calculate total
+    total := int64(len(allProducts))
+    
+    // Manual pagination
+    var paginatedProducts []*entity.Product
+    start := offset
+    end := offset + limit
+    
+    if start < len(allProducts) {
+        if end > len(allProducts) {
+            end = len(allProducts)
+        }
+        paginatedProducts = allProducts[start:end]
+    }
+    
+    return paginatedProducts, total, nil
 }
 
 func (r *firestoreProductRepository) Update(ctx context.Context, product *entity.Product) error {

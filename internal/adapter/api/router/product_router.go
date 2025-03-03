@@ -8,15 +8,19 @@ import (
 )
 
 // SetupProductRouter initializes product routes
-func SetupProductRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware) {
+func SetupProductRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddleware *middleware.AdminMiddleware) {
 	// Get handlers from DI
 	productHandler := handler.GetProductHandler()
+	admin := e.Group("/v1/admin/products")
 
 	// Public product routes
 	products := e.Group("/v1/products")
 	products.GET("", productHandler.ListProducts)
 	products.GET("/:id", productHandler.GetProduct)
 	products.GET("/search", productHandler.SearchProducts)
+	admin.POST("/migrate-bumped-at", productHandler.MigrateProductsBumpedAt)
+	admin.Use(authMiddleware.Authenticate)
+	admin.Use(adminMiddleware.AdminOnly)
 
 	// Protected product routes (require authentication)
 	myProducts := e.Group("/v1/my-products")

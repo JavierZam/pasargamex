@@ -248,3 +248,23 @@ func (uc *ProductUseCase) BumpProduct(ctx context.Context, productID string, sel
 
     return product, nil
 }
+
+func (uc *ProductUseCase) MigrateProductsBumpedAt(ctx context.Context) error {
+    // Ambil semua produk
+    products, _, err := uc.productRepo.List(ctx, nil, "", 1000, 0)
+    if err != nil {
+        return err
+    }
+    
+    // Update setiap produk jika bumpedAt tidak ada
+    for _, product := range products {
+        if product.BumpedAt.IsZero() {
+            product.BumpedAt = product.CreatedAt
+            if err := uc.productRepo.Update(ctx, product); err != nil {
+                return err
+            }
+        }
+    }
+    
+    return nil
+}

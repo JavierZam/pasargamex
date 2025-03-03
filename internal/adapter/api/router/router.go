@@ -10,6 +10,6 @@ func Setup(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddlew
     SetupAuthRouter(e, authMiddleware)
     SetupUserRouter(e, authMiddleware)
     SetupGameTitleRouter(e, authMiddleware, adminMiddleware)
-    SetupProductRouter(e, authMiddleware)
+    SetupProductRouter(e, authMiddleware, adminMiddleware)
     SetupHealthRouter(e)
 }

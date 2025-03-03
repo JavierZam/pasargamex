@@ -256,3 +256,16 @@ func (h *ProductHandler) BumpProduct(c echo.Context) error {
         "product": product,
     })
 }
+
+func (h *ProductHandler) MigrateProductsBumpedAt(c echo.Context) error {
+    // Hanya admin yang bisa menjalankan migrasi
+    // Tambahkan pengecekan role admin di sini
+    
+    if err := h.productUseCase.MigrateProductsBumpedAt(c.Request().Context()); err != nil {
+        return response.Error(c, err)
+    }
+    
+    return response.Success(c, map[string]string{
+        "message": "Products migration completed successfully",
+    })
+}
