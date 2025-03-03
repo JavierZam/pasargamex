@@ -238,3 +238,21 @@ func (h *ProductHandler) DeleteProduct(c echo.Context) error {
 		"message": "Product deleted successfully",
 	})
 }
+
+func (h *ProductHandler) BumpProduct(c echo.Context) error {
+    id := c.Param("id")
+    
+    // Get user ID from context
+    sellerID := c.Get("uid").(string)
+    
+    // Call use case
+    product, err := h.productUseCase.BumpProduct(c.Request().Context(), id, sellerID)
+    if err != nil {
+        return response.Error(c, err)
+    }
+    
+    return response.Success(c, map[string]interface{}{
+        "message": "Product bumped successfully",
+        "product": product,
+    })
+}

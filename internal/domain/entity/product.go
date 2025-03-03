@@ -26,4 +26,5 @@ type Product struct {
 	CreatedAt   time.Time              `json:"created_at" firestore:"createdAt"`
 	UpdatedAt   time.Time              `json:"updated_at" firestore:"updatedAt"`
 	DeletedAt   *time.Time             `json:"deleted_at,omitempty" firestore:"deletedAt,omitempty"`
+	BumpedAt    time.Time              `json:"bumped_at" firestore:"bumpedAt"`
 }

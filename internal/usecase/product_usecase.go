@@ -219,3 +219,32 @@ func (uc *ProductUseCase) ListBySellerID(ctx context.Context, sellerID, status s
     // Call repository
     return uc.productRepo.ListBySellerID(ctx, sellerID, status, limit, offset)
 }
+
+func (uc *ProductUseCase) BumpProduct(ctx context.Context, productID string, sellerID string) (*entity.Product, error) {
+    // Get existing product
+    product, err := uc.productRepo.GetByID(ctx, productID)
+    if err != nil {
+        return nil, err
+    }
+
+    // Check ownership
+    if product.SellerID != sellerID {
+        return nil, errors.Forbidden("You don't have permission to bump this product", nil)
+    }
+
+    // Check if product is active
+    if product.Status != "active" {
+        return nil, errors.BadRequest("Only active products can be bumped", nil)
+    }
+
+    // Update bumpedAt to current time
+    product.BumpedAt = time.Now()
+    product.UpdatedAt = time.Now()
+
+    // Save to repository
+    if err := uc.productRepo.Update(ctx, product); err != nil {
+        return nil, err
+    }
+
+    return product, nil
+}

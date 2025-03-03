@@ -25,4 +25,5 @@ func SetupProductRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware)
 	myProducts.POST("", productHandler.CreateProduct)
 	myProducts.PUT("/:id", productHandler.UpdateProduct)
 	myProducts.DELETE("/:id", productHandler.DeleteProduct)
+	myProducts.POST("/:id/bump", productHandler.BumpProduct)
 }

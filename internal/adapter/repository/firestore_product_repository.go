@@ -38,6 +38,7 @@ func (r *firestoreProductRepository) Create(ctx context.Context, product *entity
 		product.CreatedAt = now
 	}
 	product.UpdatedAt = now
+    product.BumpedAt = now
 
 	// Save to Firestore
 	_, err := r.client.Collection("products").Doc(product.ID).Set(ctx, product)
@@ -68,20 +69,20 @@ func (r *firestoreProductRepository) GetByID(ctx context.Context, id string) (*e
 func (r *firestoreProductRepository) List(ctx context.Context, filter map[string]interface{}, sort string, limit, offset int) ([]*entity.Product, int64, error) {
     // Inisialisasi query
     query := r.client.Collection("products").Query
-
+    
     // Add default filter to exclude soft deleted
     if filter == nil {
         filter = make(map[string]interface{})
     }
-    
+   
     // Apply filters
     for key, value := range filter {
         query = query.Where(key, "==", value)
     }
-
+    
     // Apply default filter to exclude deleted products
     query = query.Where("deletedAt", "==", nil)
-
+    
     // Apply sorting
     if sort != "" {
         parts := strings.Split(sort, "_")
@@ -92,17 +93,17 @@ func (r *firestoreProductRepository) List(ctx context.Context, filter map[string
         }
         query = query.OrderBy(field, order)
     } else {
-        // Default sort
-        query = query.OrderBy("createdAt", firestore.Desc)
+        // Default sort - changed from createdAt to bumpedAt
+        query = query.OrderBy("bumpedAt", firestore.Desc)
     }
-
+    
     // Get total count - gunakan query yang sudah dibuat, bukan allQuery baru
     allDocs, err := query.Documents(ctx).GetAll()
     if err != nil {
         return nil, 0, errors.Internal("Failed to count products", err)
     }
     total := int64(len(allDocs))
-
+    
     // Apply pagination
     if limit > 0 {
         query = query.Limit(limit)
@@ -110,11 +111,11 @@ func (r *firestoreProductRepository) List(ctx context.Context, filter map[string
     if offset > 0 {
         query = query.Offset(offset)
     }
-
+    
     // Execute query
     iter := query.Documents(ctx)
     var products []*entity.Product
-
+    
     for {
         doc, err := iter.Next()
         if err == iterator.Done {
@@ -123,14 +124,13 @@ func (r *firestoreProductRepository) List(ctx context.Context, filter map[string
         if err != nil {
             return nil, 0, errors.Internal("Failed to iterate products", err)
         }
-
         var product entity.Product
         if err := doc.DataTo(&product); err != nil {
             return nil, 0, errors.Internal("Failed to parse product data", err)
         }
         products = append(products, &product)
     }
-
+    
     return products, total, nil
 }
 
