@@ -107,31 +107,40 @@ func (uc *ProductUseCase) GetProductByID(ctx context.Context, id string) (*entit
 }
 
 func (uc *ProductUseCase) ListProducts(ctx context.Context, gameTitleID, productType, status string, minPrice, maxPrice float64, sort string, page, limit int) ([]*entity.Product, int64, error) {
-	// Build filter
-	filter := make(map[string]interface{})
-	
-	if gameTitleID != "" {
-		filter["gameTitleId"] = gameTitleID
-	}
-	
-	if productType != "" {
-		filter["type"] = productType
-	}
-	
-	if status != "" {
-		filter["status"] = status
-	} else {
-		// Default to active products
-		filter["status"] = "active"
-	}
+    // Build filter
+    filter := make(map[string]interface{})
+    
+    if gameTitleID != "" {
+        filter["gameTitleId"] = gameTitleID
+    }
+    
+    if productType != "" {
+        filter["type"] = productType
+    }
+    
+    if status != "" {
+        filter["status"] = status
+    } else {
+        // Default to active products
+        filter["status"] = "active"
+    }
+    
+    // Add price filters
+    if minPrice > 0 {
+        filter["min_price"] = minPrice
+    }
+    
+    if maxPrice > 0 {
+        filter["max_price"] = maxPrice
+    }
 
-	// Calculate offset
-	offset := (page - 1) * limit
-	if offset < 0 {
-		offset = 0
-	}
+    // Calculate offset
+    offset := (page - 1) * limit
+    if offset < 0 {
+        offset = 0
+    }
 
-	return uc.productRepo.List(ctx, filter, sort, limit, offset)
+    return uc.productRepo.List(ctx, filter, sort, limit, offset)
 }
 
 func (uc *ProductUseCase) UpdateProduct(ctx context.Context, id string, sellerID string, input CreateProductInput, images []ProductImageInput) (*entity.Product, error) {

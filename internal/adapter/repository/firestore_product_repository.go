@@ -71,6 +71,17 @@ func (r *firestoreProductRepository) GetByID(ctx context.Context, id string) (*e
 func (r *firestoreProductRepository) List(ctx context.Context, filter map[string]interface{}, sortType string, limit, offset int) ([]*entity.Product, int64, error) {
     log.Printf("Listing products with filter: %v, sort: %s", filter, sortType)
     
+    // Extract price filters (they are not direct Firestore filters)
+    var minPrice, maxPrice float64
+    if minPriceVal, ok := filter["min_price"]; ok {
+        minPrice = minPriceVal.(float64)
+        delete(filter, "min_price") // Remove from Firestore filters
+    }
+    if maxPriceVal, ok := filter["max_price"]; ok {
+        maxPrice = maxPriceVal.(float64)
+        delete(filter, "max_price") // Remove from Firestore filters
+    }
+    
     // Base query
     collection := r.client.Collection("products")
     var query firestore.Query = collection.Query
@@ -101,6 +112,15 @@ func (r *firestoreProductRepository) List(ctx context.Context, filter map[string
             continue // Skip products that fail to parse
         }
         
+        // Apply price filters
+        if (minPrice > 0 && product.Price < minPrice) || 
+           (maxPrice > 0 && product.Price > maxPrice) {
+            // Skip products outside price range
+            log.Printf("Skipping product %s with price %.2f (outside range %.2f-%.2f)", 
+                      product.ID, product.Price, minPrice, maxPrice)
+            continue
+        }
+        
         // Ensure ID is set
         product.ID = doc.Ref.ID
         
@@ -111,6 +131,8 @@ func (r *firestoreProductRepository) List(ctx context.Context, filter map[string
         
         allProducts = append(allProducts, &product)
     }
+    
+    log.Printf("After price filtering: %d products remain", len(allProducts))
 
     if sortType == "price_asc" {
         // Sort by price ascending
