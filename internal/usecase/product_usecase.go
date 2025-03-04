@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"pasargamex/internal/domain/entity"
@@ -276,4 +277,41 @@ func (uc *ProductUseCase) MigrateProductsBumpedAt(ctx context.Context) error {
     }
     
     return nil
+}
+
+func (uc *ProductUseCase) SearchProducts(ctx context.Context, query string, gameTitleID, productType, status string, minPrice, maxPrice float64, page, limit int) ([]*entity.Product, int64, error) {
+    log.Printf("SearchProducts usecase called with query: '%s'", query)
+    
+    // Build filter
+    filter := make(map[string]interface{})
+    
+    if gameTitleID != "" {
+        filter["gameTitleId"] = gameTitleID
+    }
+    
+    if productType != "" {
+        filter["type"] = productType
+    }
+    
+    if status != "" {
+        filter["status"] = status
+    }
+    
+    // Add price filters
+    if minPrice > 0 {
+        filter["min_price"] = minPrice
+    }
+    
+    if maxPrice > 0 {
+        filter["max_price"] = maxPrice
+    }
+    
+    // Calculate offset
+    offset := (page - 1) * limit
+    if offset < 0 {
+        offset = 0
+    }
+    
+    // Call repository.Search, not repository.List
+    return uc.productRepo.Search(ctx, query, filter, limit, offset)
 }

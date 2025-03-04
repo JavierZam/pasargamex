@@ -230,54 +230,134 @@ func (r *firestoreProductRepository) IncrementViews(ctx context.Context, id stri
 	return nil
 }
 
-func (r *firestoreProductRepository) SearchByTitle(ctx context.Context, query string, filter map[string]interface{}, sort string, limit, offset int) ([]*entity.Product, int64, error) {
-    // Basic search implementation with Firestore
-    // In a real application, consider using a dedicated search service like Algolia or Elasticsearch
-    query = strings.ToLower(query)
+func (r *firestoreProductRepository) Search(ctx context.Context, query string, filter map[string]interface{}, limit, offset int) ([]*entity.Product, int64, error) {
+    log.Printf("=== Search repository called with query: '%s' ===", query)
+    log.Printf("Filter: %v", filter)
     
-    baseQuery := r.client.Collection("products").Query.Where("deletedAt", "==", nil)
-    
-    // Apply filters
-    for key, value := range filter {
-        baseQuery = baseQuery.Where(key, "==", value)
+    // Extract price filters
+    var minPrice, maxPrice float64
+    if minPriceVal, ok := filter["min_price"]; ok {
+        minPrice = minPriceVal.(float64)
+        log.Printf("Filtering with min_price: %.2f", minPrice)
+        delete(filter, "min_price")
+    }
+    if maxPriceVal, ok := filter["max_price"]; ok {
+        maxPrice = maxPriceVal.(float64)
+        log.Printf("Filtering with max_price: %.2f", maxPrice)
+        delete(filter, "max_price")
     }
     
-    // Get all documents (inefficient for large datasets, but Firestore doesn't support full-text search)
-    docs, err := baseQuery.Documents(ctx).GetAll()
+    // Get ALL documents first, tanpa filter
+    collection := r.client.Collection("products")
+    docs, err := collection.Documents(ctx).GetAll()
     if err != nil {
+        log.Printf("Error getting products: %v", err)
         return nil, 0, errors.Internal("Failed to search products", err)
     }
     
-    // Filter manually by title
-    var matchedProducts []*entity.Product
+    log.Printf("Found %d raw documents in collection", len(docs))
+    
+    // Parse all documents
+    var allProducts []*entity.Product
     for _, doc := range docs {
         var product entity.Product
         if err := doc.DataTo(&product); err != nil {
+            log.Printf("Error parsing product: %v", err)
+            continue
+        }
+        product.ID = doc.Ref.ID
+        allProducts = append(allProducts, &product)
+    }
+    
+    log.Printf("Successfully parsed %d products", len(allProducts))
+    
+    // Now filter manually
+    var filteredProducts []*entity.Product
+    searchTerms := strings.ToLower(query)
+    
+    for _, product := range allProducts {
+        log.Printf("Checking product %s: Title='%s', Price=%.2f", product.ID, product.Title, product.Price)
+        
+        // Apply price filters FIRST
+        if minPrice > 0 {
+            if product.Price < minPrice {
+                log.Printf("❌ Skipping product %s: price %.2f < min_price %.2f", 
+                          product.ID, product.Price, minPrice)
+                continue
+            }
+        }
+        
+        if maxPrice > 0 {
+            if product.Price > maxPrice {
+                log.Printf("❌ Skipping product %s: price %.2f > max_price %.2f", 
+                          product.ID, product.Price, maxPrice)
+                continue
+            }
+        }
+        
+        // Apply other filters from map
+        skipProduct := false
+        for key, value := range filter {
+            if key == "gameTitleId" && value != product.GameTitleID {
+                skipProduct = true
+                break
+            }
+            if key == "type" && value != product.Type {
+                skipProduct = true
+                break
+            }
+            if key == "status" && value != product.Status {
+                skipProduct = true
+                break
+            }
+        }
+        
+        if skipProduct {
+            log.Printf("Skipping product %s due to filter mismatch", product.ID)
             continue
         }
         
-        // Simple case-insensitive contains check
-        if strings.Contains(strings.ToLower(product.Title), query) {
-            matchedProducts = append(matchedProducts, &product)
+        // Apply search
+        titleLower := strings.ToLower(product.Title)
+        descLower := strings.ToLower(product.Description)
+        
+        if strings.Contains(titleLower, searchTerms) || strings.Contains(descLower, searchTerms) {
+            log.Printf("✅ MATCH Product %s matches search terms", product.ID)
+            filteredProducts = append(filteredProducts, product)
+        } else {
+            log.Printf("❌ NO MATCH Product %s does not match search terms", product.ID)
         }
     }
     
-    total := int64(len(matchedProducts))
+    log.Printf("After filtering: %d products match criteria", len(filteredProducts))
     
-    // Manual sort
-    // Implement sorting logic here
+    // Sorting by bumpedAt
+    if len(filteredProducts) > 0 {
+        slices.SortFunc(filteredProducts, func(a, b *entity.Product) int {
+            if a.BumpedAt.After(b.BumpedAt) {
+                return -1
+            } else if a.BumpedAt.Before(b.BumpedAt) {
+                return 1
+            }
+            return 0
+        })
+    }
     
-    // Manual pagination
+    // Apply pagination
+    var paginatedProducts []*entity.Product
     start := offset
     end := offset + limit
-    if start >= len(matchedProducts) {
-        return []*entity.Product{}, total, nil
-    }
-    if end > len(matchedProducts) {
-        end = len(matchedProducts)
+    
+    if len(filteredProducts) > 0 && start < len(filteredProducts) {
+        if end > len(filteredProducts) {
+            end = len(filteredProducts)
+        }
+        paginatedProducts = filteredProducts[start:end]
+    } else {
+        paginatedProducts = []*entity.Product{} // Empty slice instead of nil
     }
     
-    return matchedProducts[start:end], total, nil
+    return paginatedProducts, int64(len(filteredProducts)), nil
 }
 
 func (r *firestoreProductRepository) ListBySellerID(ctx context.Context, sellerID string, status string, limit, offset int) ([]*entity.Product, int64, error) {

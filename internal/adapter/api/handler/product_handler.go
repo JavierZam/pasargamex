@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"log"
 	"strconv"
 
 	"pasargamex/internal/usecase"
+	"pasargamex/pkg/errors"
 	"pasargamex/pkg/response"
 	"pasargamex/pkg/utils"
 
@@ -143,9 +145,79 @@ func (h *ProductHandler) ListProducts(c echo.Context) error {
 }
 
 func (h *ProductHandler) SearchProducts(c echo.Context) error {
-	// Implementation for search
-	// Similar to ListProducts but with search query
-	return c.JSON(200, map[string]string{"message": "Not implemented yet"})
+    log.Printf("=== SearchProducts handler called ===")
+    
+    // Parse query parameters
+    query := c.QueryParam("q")
+    if query == "" {
+        return response.Error(c, errors.BadRequest("Search query is required", nil))
+    }
+    
+    log.Printf("Search query: '%s'", query)
+    
+    // Parse other parameters
+    gameTitleID := c.QueryParam("game_title_id")
+    productType := c.QueryParam("type")
+    status := c.QueryParam("status")
+    
+    // Default status to active if not provided
+    if status == "" {
+        status = "active"
+    }
+    
+    // PERBAIKAN: Parsing price dengan logging yang lebih baik
+    var minPrice, maxPrice float64
+    minPriceStr := c.QueryParam("min_price")
+    maxPriceStr := c.QueryParam("max_price")
+    
+    if minPriceStr != "" {
+        var err error
+        minPrice, err = strconv.ParseFloat(minPriceStr, 64)
+        if err != nil {
+            log.Printf("Error parsing min_price '%s': %v", minPriceStr, err)
+            // Default to 0 instead of returning error
+            minPrice = 0
+        } else {
+            log.Printf("Using min_price filter: %.2f", minPrice)
+        }
+    }
+    
+    if maxPriceStr != "" {
+        var err error
+        maxPrice, err = strconv.ParseFloat(maxPriceStr, 64)
+        if err != nil {
+            log.Printf("Error parsing max_price '%s': %v", maxPriceStr, err)
+            // Default to 0 instead of returning error
+            maxPrice = 0
+        } else {
+            log.Printf("Using max_price filter: %.2f", maxPrice)
+        }
+    }
+    
+    // Get pagination parameters
+    pagination := utils.GetPaginationParams(c)
+    
+    // Call use case for search specifically
+    products, total, err := h.productUseCase.SearchProducts(
+        c.Request().Context(),
+        query,
+        gameTitleID,
+        productType,
+        status,
+        minPrice,
+        maxPrice,
+        pagination.Page,
+        pagination.PageSize,
+    )
+    
+    if err != nil {
+        log.Printf("Error searching products: %v", err)
+        return response.Error(c, err)
+    }
+    
+    log.Printf("Search returned %d products", len(products))
+    
+    return response.Paginated(c, products, total, pagination.Page, pagination.PageSize)
 }
 
 func (h *ProductHandler) ListMyProducts(c echo.Context) error {

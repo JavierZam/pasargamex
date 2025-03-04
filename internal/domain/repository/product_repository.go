@@ -14,6 +14,7 @@ type ProductRepository interface {
 	Delete(ctx context.Context, id string) error
 	SoftDelete(ctx context.Context, id string) error
 	IncrementViews(ctx context.Context, id string) error
-	SearchByTitle(ctx context.Context, query string, filter map[string]interface{}, sort string, limit, offset int) ([]*entity.Product, int64, error)
 	ListBySellerID(ctx context.Context, sellerID string, status string, limit, offset int) ([]*entity.Product, int64, error)
+	Search(ctx context.Context, query string, filter map[string]interface{}, limit, offset int) ([]*entity.Product, int64, error)
+
 }
