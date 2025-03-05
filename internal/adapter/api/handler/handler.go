@@ -9,6 +9,7 @@ var (
 	userHandler      *UserHandler
 	gameTitleHandler *GameTitleHandler
 	productHandler   *ProductHandler
+	reviewHandler    *ReviewHandler
 )
 
 // Setup initializes all handlers
@@ -17,11 +18,13 @@ func Setup(
 	userUseCase *usecase.UserUseCase,
 	gameTitleUseCase *usecase.GameTitleUseCase,
 	productUseCase *usecase.ProductUseCase,
+	reviewUseCase *usecase.ReviewUseCase,
 ) {
 	authHandler = NewAuthHandler(authUseCase)
 	userHandler = NewUserHandler(userUseCase)
 	gameTitleHandler = NewGameTitleHandler(gameTitleUseCase)
 	productHandler = NewProductHandler(productUseCase)
+	reviewHandler = NewReviewHandler(reviewUseCase)
 }
 
 // GetAuthHandler returns the auth handler
@@ -41,4 +44,8 @@ func GetGameTitleHandler() *GameTitleHandler {
 
 func GetProductHandler() *ProductHandler {
 	return productHandler
+}
+
+func GetReviewHandler() *ReviewHandler {
+	return reviewHandler
 }

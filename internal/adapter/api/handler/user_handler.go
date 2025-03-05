@@ -3,7 +3,9 @@ package handler
 import (
 	"log"
 	"pasargamex/internal/usecase"
+	"pasargamex/pkg/errors"
 	"pasargamex/pkg/response"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -22,6 +24,14 @@ type updateProfileRequest struct {
 	Username string `json:"username" validate:"omitempty,min=3"`
 	Phone    string `json:"phone" validate:"omitempty,e164"`
 	Bio      string `json:"bio" validate:"omitempty,max=500"`
+}
+
+type verifyIdentityRequest struct {
+	FullName    string    `json:"full_name" validate:"required"`
+	Address     string    `json:"address" validate:"required"`
+	DateOfBirth string    `json:"date_of_birth" validate:"required"`  // Format "YYYY-MM-DD"
+	IdNumber    string    `json:"id_number" validate:"required"`
+	IdCardImage string    `json:"id_card_image" validate:"required,url"`
 }
 
 func (h *UserHandler) UpdateProfile(c echo.Context) error {
@@ -115,4 +125,76 @@ func (h *UserHandler) UpdatePassword(c echo.Context) error {
     return response.Success(c, map[string]string{
         "message": "Password updated successfully",
     })
+}
+
+func (h *UserHandler) SubmitVerification(c echo.Context) error {
+	var req verifyIdentityRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, err)
+	}
+	
+	if err := c.Validate(&req); err != nil {
+		return response.Error(c, err)
+	}
+	
+	// Parse date of birth
+	dob, err := time.Parse("2006-01-02", req.DateOfBirth)
+	if err != nil {
+		return response.Error(c, errors.BadRequest("Invalid date format", err))
+	}
+	
+	// Get user ID from context
+	userID := c.Get("uid").(string)
+	
+	// Call use case
+	user, err := h.userUseCase.SubmitVerification(c.Request().Context(), userID, usecase.VerifyIdentityInput{
+		FullName:    req.FullName,
+		Address:     req.Address,
+		DateOfBirth: dob,
+		IdNumber:    req.IdNumber,
+		IdCardImage: req.IdCardImage,
+	})
+	
+	if err != nil {
+		return response.Error(c, err)
+	}
+	
+	return response.Success(c, user)
+}
+
+// Admin handler
+type processVerificationRequest struct {
+	Status string `json:"status" validate:"required,oneof=verified rejected"`
+}
+
+func (h *UserHandler) ProcessVerification(c echo.Context) error {
+	// Validate admin
+	// TODO: Check admin role
+	
+	// Get user ID from path
+	userID := c.Param("userId")
+	if userID == "" {
+		return response.Error(c, errors.BadRequest("User ID is required", nil))
+	}
+	
+	// Parse request body
+	var req processVerificationRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, err)
+	}
+	
+	if err := c.Validate(&req); err != nil {
+		return response.Error(c, err)
+	}
+	
+	// Get admin ID from context
+	adminID := c.Get("uid").(string)
+	
+	// Call use case
+	user, err := h.userUseCase.ProcessVerification(c.Request().Context(), adminID, userID, req.Status)
+	if err != nil {
+		return response.Error(c, err)
+	}
+	
+	return response.Success(c, user)
 }

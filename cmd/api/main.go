@@ -62,6 +62,7 @@ func main() {
 	userRepo := repository.NewFirestoreUserRepository(firestoreClient)
 	gameTitleRepo := repository.NewFirestoreGameTitleRepository(firestoreClient)
 	productRepo := repository.NewFirestoreProductRepository(firestoreClient)
+	reviewRepo := repository.NewFirestoreReviewRepository(firestoreClient)
 
 	// Initialize Firebase auth client adapter
 	firebaseAuthClient := firebase.NewFirebaseAuthClient(authClient, cfg.FirebaseApiKey)
@@ -71,9 +72,10 @@ func main() {
 	userUseCase := usecase.NewUserUseCase(userRepo, firebaseAuthClient)
 	gameTitleUseCase := usecase.NewGameTitleUseCase(gameTitleRepo)
 	productUseCase := usecase.NewProductUseCase(productRepo, gameTitleRepo, userRepo)
+	reviewUseCase := usecase.NewReviewUseCase(reviewRepo, userRepo)
 
 	// Setup handlers
-	handler.Setup(authUseCase, userUseCase, gameTitleUseCase, productUseCase)
+	handler.Setup(authUseCase, userUseCase, gameTitleUseCase, productUseCase, reviewUseCase)
 	handler.SetupHealthHandler(firebaseAuthClient)
 
 	// Initialize Echo
