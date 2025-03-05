@@ -7,7 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// SetupProductRouter initializes product routes
+// SetupProductRouter initializes product routes - updated version
 func SetupProductRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddleware *middleware.AdminMiddleware) {
     // Get handlers from DI
     productHandler := handler.GetProductHandler()
@@ -32,4 +32,7 @@ func SetupProductRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware,
     admin.Use(authMiddleware.Authenticate)
     admin.Use(adminMiddleware.AdminOnly)
     admin.POST("/migrate-bumped-at", productHandler.MigrateProductsBumpedAt)
+    
+    // New endpoint for validating product credentials
+    admin.POST("/validate-credentials", productHandler.ValidateCredentials)
 }

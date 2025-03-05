@@ -21,6 +21,12 @@ type Product struct {
 	Attributes  map[string]interface{} `json:"attributes" firestore:"attributes"`
 	Images      []ProductImage         `json:"images" firestore:"images"`
 	Status      string                 `json:"status" firestore:"status"` // draft, active, sold, suspended
+	
+	// Delivery method dan data terkait
+	DeliveryMethod       string                 `json:"delivery_method" firestore:"deliveryMethod"` // "instant", "middleman", or "both"
+	Credentials          map[string]interface{} `json:"credentials,omitempty" firestore:"credentials,omitempty"` // Hanya ditampilkan ke pembeli setelah pembayaran
+	CredentialsValidated bool                   `json:"credentials_validated" firestore:"credentialsValidated"` // Untuk instant delivery
+	
 	Views       int                    `json:"views" firestore:"views"`
 	Featured    bool                   `json:"featured" firestore:"featured"`
 	CreatedAt   time.Time              `json:"created_at" firestore:"createdAt"`

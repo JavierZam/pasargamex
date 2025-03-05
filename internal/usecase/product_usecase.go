@@ -29,13 +29,15 @@ func NewProductUseCase(
 }
 
 type CreateProductInput struct {
-	GameTitleID string                 `json:"game_title_id"`
-	Title       string                 `json:"title"`
-	Description string                 `json:"description"`
-	Price       float64                `json:"price"`
-	Type        string                 `json:"type"` // account, topup, boosting, item
-	Attributes  map[string]interface{} `json:"attributes"`
-	Status      string                 `json:"status"`
+	GameTitleID    string                 `json:"game_title_id"`
+	Title          string                 `json:"title"`
+	Description    string                 `json:"description"`
+	Price          float64                `json:"price"`
+	Type           string                 `json:"type"` // account, topup, boosting, item
+	Attributes     map[string]interface{} `json:"attributes"`
+	Status         string                 `json:"status"`
+	DeliveryMethod string                 `json:"delivery_method"` // "instant", "middleman", "both"
+	Credentials    map[string]interface{} `json:"credentials,omitempty"`
 }
 
 type ProductImageInput struct {
@@ -51,40 +53,140 @@ func (uc *ProductUseCase) CreateProduct(ctx context.Context, sellerID string, in
 	}
 
 	// Validate user
-	_, err = uc.userRepo.GetByID(ctx, sellerID)
+	seller, err := uc.userRepo.GetByID(ctx, sellerID)
 	if err != nil {
 		return nil, errors.BadRequest("Invalid seller", err)
+	}
+
+	// Validate seller is verified if using instant delivery
+	if (input.DeliveryMethod == "instant" || input.DeliveryMethod == "both") && seller.VerificationStatus != "verified" {
+		return nil, errors.BadRequest("Seller must be verified to use instant delivery", nil)
+	}
+
+	// Validate delivery method
+	if input.DeliveryMethod != "instant" && input.DeliveryMethod != "middleman" && input.DeliveryMethod != "both" {
+		return nil, errors.BadRequest("Invalid delivery method", nil)
+	}
+
+	// For instant delivery, credentials are required
+	if (input.DeliveryMethod == "instant" || input.DeliveryMethod == "both") && len(input.Credentials) == 0 {
+		return nil, errors.BadRequest("Credentials are required for instant delivery", nil)
 	}
 
 	// Convert images
 	productImages := make([]entity.ProductImage, len(images))
 	for i, img := range images {
 		productImages[i] = entity.ProductImage{
-			ID:          generateUUID(), // Implement this function
-			URL:         img.URL,
+			ID:           generateUUID(), // Implement this function
+			URL:          img.URL,
 			DisplayOrder: img.DisplayOrder,
 		}
 	}
 
 	// Create product
 	product := &entity.Product{
-		GameTitleID: gameTitle.ID,
-		SellerID:    sellerID,
-		Title:       input.Title,
-		Description: input.Description,
-		Price:       input.Price,
-		Type:        input.Type,
-		Attributes:  input.Attributes,
-		Status:      input.Status,
-		Images:      productImages,
-		Views:       0,
-		Featured:    false,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		GameTitleID:         gameTitle.ID,
+		SellerID:            sellerID,
+		Title:               input.Title,
+		Description:         input.Description,
+		Price:               input.Price,
+		Type:                input.Type,
+		Attributes:          input.Attributes,
+		Status:              input.Status,
+		Images:              productImages,
+		Views:               0,
+		Featured:            false,
+		DeliveryMethod:      input.DeliveryMethod,
+		Credentials:         input.Credentials,
+		CredentialsValidated: false, // Credentials need to be validated by admin
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
+		BumpedAt:            time.Now(),
 	}
 
 	// Save to repository
 	if err := uc.productRepo.Create(ctx, product); err != nil {
+		return nil, err
+	}
+
+	return product, nil
+}
+
+func (uc *ProductUseCase) UpdateProduct(ctx context.Context, id string, sellerID string, input CreateProductInput, images []ProductImageInput) (*entity.Product, error) {
+	// Get existing product
+	product, err := uc.productRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check ownership
+	if product.SellerID != sellerID {
+		return nil, errors.Forbidden("You don't have permission to update this product", nil)
+	}
+
+	// Validate game title if changing
+	if input.GameTitleID != product.GameTitleID {
+		_, err = uc.gameTitleRepo.GetByID(ctx, input.GameTitleID)
+		if err != nil {
+			return nil, errors.BadRequest("Invalid game title", err)
+		}
+		product.GameTitleID = input.GameTitleID
+	}
+	
+	// Validate seller is verified if using instant delivery
+	if (input.DeliveryMethod == "instant" || input.DeliveryMethod == "both") {
+		seller, err := uc.userRepo.GetByID(ctx, sellerID)
+		if err != nil {
+			return nil, errors.BadRequest("Invalid seller", err)
+		}
+		
+		if seller.VerificationStatus != "verified" {
+			return nil, errors.BadRequest("Seller must be verified to use instant delivery", nil)
+		}
+	}
+
+	// Validate delivery method
+	if input.DeliveryMethod != "instant" && input.DeliveryMethod != "middleman" && input.DeliveryMethod != "both" {
+		return nil, errors.BadRequest("Invalid delivery method", nil)
+	}
+
+	// For instant delivery, credentials are required
+	if (input.DeliveryMethod == "instant" || input.DeliveryMethod == "both") && 
+	   len(input.Credentials) == 0 && len(product.Credentials) == 0 {
+		return nil, errors.BadRequest("Credentials are required for instant delivery", nil)
+	}
+
+	// Update fields
+	product.Title = input.Title
+	product.Description = input.Description
+	product.Price = input.Price
+	product.Type = input.Type
+	product.Attributes = input.Attributes
+	product.Status = input.Status
+	product.DeliveryMethod = input.DeliveryMethod
+	product.UpdatedAt = time.Now()
+	
+	// Update credentials if provided
+	if len(input.Credentials) > 0 {
+		product.Credentials = input.Credentials
+		product.CredentialsValidated = false // Reset validation when credentials are updated
+	}
+
+	// Update images if provided
+	if len(images) > 0 {
+		productImages := make([]entity.ProductImage, len(images))
+		for i, img := range images {
+			productImages[i] = entity.ProductImage{
+				ID:           generateUUID(), // Implement this function
+				URL:          img.URL,
+				DisplayOrder: img.DisplayOrder,
+			}
+		}
+		product.Images = productImages
+	}
+
+	// Save to repository
+	if err := uc.productRepo.Update(ctx, product); err != nil {
 		return nil, err
 	}
 
@@ -142,57 +244,6 @@ func (uc *ProductUseCase) ListProducts(ctx context.Context, gameTitleID, product
     }
 
     return uc.productRepo.List(ctx, filter, sort, limit, offset)
-}
-
-func (uc *ProductUseCase) UpdateProduct(ctx context.Context, id string, sellerID string, input CreateProductInput, images []ProductImageInput) (*entity.Product, error) {
-	// Get existing product
-	product, err := uc.productRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check ownership
-	if product.SellerID != sellerID {
-		return nil, errors.Forbidden("You don't have permission to update this product", nil)
-	}
-
-	// Validate game title if changing
-	if input.GameTitleID != product.GameTitleID {
-		_, err = uc.gameTitleRepo.GetByID(ctx, input.GameTitleID)
-		if err != nil {
-			return nil, errors.BadRequest("Invalid game title", err)
-		}
-		product.GameTitleID = input.GameTitleID
-	}
-
-	// Update fields
-	product.Title = input.Title
-	product.Description = input.Description
-	product.Price = input.Price
-	product.Type = input.Type
-	product.Attributes = input.Attributes
-	product.Status = input.Status
-	product.UpdatedAt = time.Now()
-
-	// Update images if provided
-	if len(images) > 0 {
-		productImages := make([]entity.ProductImage, len(images))
-		for i, img := range images {
-			productImages[i] = entity.ProductImage{
-				ID:          generateUUID(), // Implement this function
-				URL:         img.URL,
-				DisplayOrder: img.DisplayOrder,
-			}
-		}
-		product.Images = productImages
-	}
-
-	// Save to repository
-	if err := uc.productRepo.Update(ctx, product); err != nil {
-		return nil, err
-	}
-
-	return product, nil
 }
 
 func (uc *ProductUseCase) DeleteProduct(ctx context.Context, id string, sellerID string) error {
@@ -314,4 +365,36 @@ func (uc *ProductUseCase) SearchProducts(ctx context.Context, query string, game
     
     // Call repository.Search, not repository.List
     return uc.productRepo.Search(ctx, query, filter, limit, offset)
+}
+
+func (uc *ProductUseCase) ValidateCredentials(ctx context.Context, adminID string, productID string, credentials map[string]interface{}) (bool, error) {
+	// TODO: Validate that adminID is actually an admin
+	
+	// Get the product
+	product, err := uc.productRepo.GetByID(ctx, productID)
+	if err != nil {
+		return false, err
+	}
+	
+	// Check if product uses instant delivery
+	if product.DeliveryMethod != "instant" && product.DeliveryMethod != "both" {
+		return false, errors.BadRequest("Product does not use instant delivery", nil)
+	}
+	
+	// Compare credentials provided with product credentials
+	// In a real-world scenario, you'd have more sophisticated validation
+	// This is a simplified example
+	if len(credentials) == 0 {
+		return false, errors.BadRequest("No credentials provided", nil)
+	}
+	
+	// Update product to mark credentials as validated
+	product.CredentialsValidated = true
+	product.UpdatedAt = time.Now()
+	
+	if err := uc.productRepo.Update(ctx, product); err != nil {
+		return false, errors.Internal("Failed to update product validation status", err)
+	}
+	
+	return true, nil
 }

@@ -1,0 +1,25 @@
+package repository
+
+import (
+	"context"
+	"pasargamex/internal/domain/entity"
+)
+
+type TransactionRepository interface {
+	// Transaction methods
+	Create(ctx context.Context, transaction *entity.Transaction) error
+	GetByID(ctx context.Context, id string) (*entity.Transaction, error)
+	Update(ctx context.Context, transaction *entity.Transaction) error
+	List(ctx context.Context, filter map[string]interface{}, limit, offset int) ([]*entity.Transaction, int64, error)
+	
+	// Transaction Log methods
+	CreateLog(ctx context.Context, log *entity.TransactionLog) error
+	ListLogsByTransactionID(ctx context.Context, transactionID string) ([]*entity.TransactionLog, error)
+	
+	// Helper methods for specific queries
+	ListByUserID(ctx context.Context, userID string, role string, status string, limit, offset int) ([]*entity.Transaction, int64, error)
+	ListPendingMiddlemanTransactions(ctx context.Context, limit, offset int) ([]*entity.Transaction, int64, error)
+	
+	// Statistics methods
+	GetTransactionStats(ctx context.Context, userID string, period string) (map[string]interface{}, error)
+}

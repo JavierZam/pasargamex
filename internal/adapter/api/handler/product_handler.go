@@ -27,15 +27,22 @@ type productImageRequest struct {
 	DisplayOrder int    `json:"display_order"`
 }
 
+type validateCredentialsRequest struct {
+	ProductID   string                 `json:"product_id" validate:"required"`
+	Credentials map[string]interface{} `json:"credentials" validate:"required"`
+}
+
 type createProductRequest struct {
-	GameTitleID string                 `json:"game_title_id" validate:"required"`
-	Title       string                 `json:"title" validate:"required"`
-	Description string                 `json:"description"`
-	Price       float64                `json:"price" validate:"required,gt=0"`
-	Type        string                 `json:"type" validate:"required,oneof=account topup boosting item"`
-	Attributes  map[string]interface{} `json:"attributes"`
-	Images      []productImageRequest  `json:"images"`
-	Status      string                 `json:"status" validate:"required,oneof=draft active"`
+	GameTitleID       string                 `json:"game_title_id" validate:"required"`
+	Title             string                 `json:"title" validate:"required"`
+	Description       string                 `json:"description"`
+	Price             float64                `json:"price" validate:"required,gt=0"`
+	Type              string                 `json:"type" validate:"required,oneof=account topup boosting item"`
+	Attributes        map[string]interface{} `json:"attributes"`
+	Images            []productImageRequest  `json:"images"`
+	Status            string                 `json:"status" validate:"required,oneof=draft active"`
+	DeliveryMethod    string                 `json:"delivery_method" validate:"required,oneof=instant middleman both"`
+	Credentials       map[string]interface{} `json:"credentials,omitempty"` // Only for instant delivery
 }
 
 func (h *ProductHandler) CreateProduct(c echo.Context) error {
@@ -60,18 +67,20 @@ func (h *ProductHandler) CreateProduct(c echo.Context) error {
 		}
 	}
 
-	// Call use case
+	// Call use case with the updated fields
 	product, err := h.productUseCase.CreateProduct(
 		c.Request().Context(),
 		sellerID,
 		usecase.CreateProductInput{
-			GameTitleID: req.GameTitleID,
-			Title:       req.Title,
-			Description: req.Description,
-			Price:       req.Price,
-			Type:        req.Type,
-			Attributes:  req.Attributes,
-			Status:      req.Status,
+			GameTitleID:    req.GameTitleID,
+			Title:          req.Title,
+			Description:    req.Description,
+			Price:          req.Price,
+			Type:           req.Type,
+			Attributes:     req.Attributes,
+			Status:         req.Status,
+			DeliveryMethod: req.DeliveryMethod,
+			Credentials:    req.Credentials,
 		},
 		images,
 	)
@@ -81,6 +90,57 @@ func (h *ProductHandler) CreateProduct(c echo.Context) error {
 	}
 
 	return response.Created(c, product)
+}
+
+// Also update the UpdateProduct handler in a similar way
+func (h *ProductHandler) UpdateProduct(c echo.Context) error {
+	id := c.Param("id")
+	
+	var req createProductRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, err)
+	}
+	
+	if err := c.Validate(&req); err != nil {
+		return response.Error(c, err)
+	}
+	
+	// Get user ID from context
+	sellerID := c.Get("uid").(string)
+	
+	// Convert images
+	images := make([]usecase.ProductImageInput, len(req.Images))
+	for i, img := range req.Images {
+		images[i] = usecase.ProductImageInput{
+			URL:          img.URL,
+			DisplayOrder: img.DisplayOrder,
+		}
+	}
+	
+	// Call use case with updated fields
+	product, err := h.productUseCase.UpdateProduct(
+		c.Request().Context(),
+		id,
+		sellerID,
+		usecase.CreateProductInput{
+			GameTitleID:    req.GameTitleID,
+			Title:          req.Title,
+			Description:    req.Description,
+			Price:          req.Price,
+			Type:           req.Type,
+			Attributes:     req.Attributes,
+			Status:         req.Status,
+			DeliveryMethod: req.DeliveryMethod,
+			Credentials:    req.Credentials,
+		},
+		images,
+	)
+	
+	if err != nil {
+		return response.Error(c, err)
+	}
+	
+	return response.Success(c, product)
 }
 
 func (h *ProductHandler) GetProduct(c echo.Context) error {
@@ -246,54 +306,6 @@ func (h *ProductHandler) ListMyProducts(c echo.Context) error {
     return response.Paginated(c, products, total, pagination.Page, pagination.PageSize)
 }
 
-func (h *ProductHandler) UpdateProduct(c echo.Context) error {
-	id := c.Param("id")
-	
-	var req createProductRequest
-	if err := c.Bind(&req); err != nil {
-		return response.Error(c, err)
-	}
-	
-	if err := c.Validate(&req); err != nil {
-		return response.Error(c, err)
-	}
-	
-	// Get user ID from context
-	sellerID := c.Get("uid").(string)
-	
-	// Convert images
-	images := make([]usecase.ProductImageInput, len(req.Images))
-	for i, img := range req.Images {
-		images[i] = usecase.ProductImageInput{
-			URL:          img.URL,
-			DisplayOrder: img.DisplayOrder,
-		}
-	}
-	
-	// Call use case
-	product, err := h.productUseCase.UpdateProduct(
-		c.Request().Context(),
-		id,
-		sellerID,
-		usecase.CreateProductInput{
-			GameTitleID: req.GameTitleID,
-			Title:       req.Title,
-			Description: req.Description,
-			Price:       req.Price,
-			Type:        req.Type,
-			Attributes:  req.Attributes,
-			Status:      req.Status,
-		},
-		images,
-	)
-	
-	if err != nil {
-		return response.Error(c, err)
-	}
-	
-	return response.Success(c, product)
-}
-
 func (h *ProductHandler) DeleteProduct(c echo.Context) error {
 	id := c.Param("id")
 	
@@ -340,4 +352,37 @@ func (h *ProductHandler) MigrateProductsBumpedAt(c echo.Context) error {
     return response.Success(c, map[string]string{
         "message": "Products migration completed successfully",
     })
+}
+
+// ValidateCredentials is for admin to validate credentials for instant delivery products
+func (h *ProductHandler) ValidateCredentials(c echo.Context) error {
+	var req validateCredentialsRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, err)
+	}
+
+	if err := c.Validate(&req); err != nil {
+		return response.Error(c, err)
+	}
+
+	// Get admin ID from context
+	adminID := c.Get("uid").(string)
+
+	// Call use case
+	result, err := h.productUseCase.ValidateCredentials(
+		c.Request().Context(),
+		adminID,
+		req.ProductID,
+		req.Credentials,
+	)
+
+	if err != nil {
+		return response.Error(c, err)
+	}
+
+	return response.Success(c, map[string]interface{}{
+		"product_id": req.ProductID,
+		"validated": result,
+		"message": "Credentials have been validated",
+	})
 }
