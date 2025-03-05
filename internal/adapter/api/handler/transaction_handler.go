@@ -19,15 +19,8 @@ func NewTransactionHandler(transactionUseCase *usecase.TransactionUseCase) *Tran
 	}
 }
 
-// Singleton instance
-var transactionHandler *TransactionHandler
-
 func SetupTransactionHandler(transactionUseCase *usecase.TransactionUseCase) {
 	transactionHandler = NewTransactionHandler(transactionUseCase)
-}
-
-func GetTransactionHandler() *TransactionHandler {
-	return transactionHandler
 }
 
 type resolveDisputeRequest struct {
@@ -93,13 +86,13 @@ func (h *TransactionHandler) ListTransactions(c echo.Context) error {
 	role := c.QueryParam("role")     // "buyer" atau "seller"
 	status := c.QueryParam("status") // Status transaksi
 	
-	// Get pagination parameters
+	// Get pagination parameters using the utility
 	pagination := utils.GetPaginationParams(c)
 	
 	// Get user ID from context
 	userID := c.Get("uid").(string)
 	
-	// Call use case
+	// Call use case with pagination parameters
 	transactions, total, err := h.transactionUseCase.ListTransactions(
 		c.Request().Context(),
 		userID,
@@ -176,12 +169,11 @@ func (h *TransactionHandler) GetTransactionLogs(c echo.Context) error {
 	return response.Success(c, logs)
 }
 
-// Untuk admin - list semua transaksi
 func (h *TransactionHandler) ListAdminTransactions(c echo.Context) error {
 	// Parse query parameters
 	status := c.QueryParam("status")
 	
-	// Get pagination parameters
+	// Get pagination parameters using the utility
 	pagination := utils.GetPaginationParams(c)
 	
 	// Get admin ID from context
@@ -193,7 +185,7 @@ func (h *TransactionHandler) ListAdminTransactions(c echo.Context) error {
 		filter["status"] = status
 	}
 	
-	// Call repository method (through use case later)
+	// Call use case with pagination parameters
 	transactions, total, err := h.transactionUseCase.ListAdminTransactions(
 		c.Request().Context(),
 		adminID,
@@ -209,15 +201,14 @@ func (h *TransactionHandler) ListAdminTransactions(c echo.Context) error {
 	return response.Paginated(c, transactions, total, pagination.Page, pagination.PageSize)
 }
 
-// Untuk admin - list transaksi yang membutuhkan middleman
 func (h *TransactionHandler) ListPendingMiddlemanTransactions(c echo.Context) error {
-	// Get pagination parameters
+	// Get pagination parameters using the utility
 	pagination := utils.GetPaginationParams(c)
 	
 	// Get admin ID from context
 	adminID := c.Get("uid").(string)
 	
-	// Call use case
+	// Call use case with pagination parameters
 	transactions, total, err := h.transactionUseCase.ListPendingMiddlemanTransactions(
 		c.Request().Context(),
 		adminID,

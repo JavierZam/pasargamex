@@ -65,11 +65,36 @@ func (r *firestoreUserRepository) Update(ctx context.Context, user *entity.User)
         "phone":     user.Phone,
         "bio":       user.Bio,
         "updatedAt": time.Now(),
+        
+        // Add verification fields
+        "fullName":           user.FullName,
+        "address":            user.Address,
+        "dateOfBirth":        user.DateOfBirth,
+        "idNumber":           user.IdNumber,
+        "idCardImage":        user.IdCardImage,
+        "verificationStatus": user.VerificationStatus,
     }
     
-    log.Printf("Update data: %+v", updateData)
+    // Only include non-empty fields
+    // This prevents overwriting existing data with empty values
+    cleanUpdateData := make(map[string]interface{})
+    for key, value := range updateData {
+        // Skip empty strings
+        if strVal, ok := value.(string); ok && strVal == "" {
+            continue
+        }
+        
+        // Skip zero time
+        if timeVal, ok := value.(time.Time); ok && timeVal.IsZero() {
+            continue
+        }
+        
+        cleanUpdateData[key] = value
+    }
     
-    _, err := r.client.Collection("users").Doc(user.ID).Set(ctx, updateData, firestore.MergeAll)
+    log.Printf("Update data: %+v", cleanUpdateData)
+    
+    _, err := r.client.Collection("users").Doc(user.ID).Set(ctx, cleanUpdateData, firestore.MergeAll)
     
     if err != nil {
         log.Printf("Firestore update error: %v", err)

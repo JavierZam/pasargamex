@@ -7,6 +7,8 @@ import (
 	"pasargamex/internal/domain/entity"
 	"pasargamex/internal/domain/repository"
 	"pasargamex/pkg/errors"
+	"pasargamex/pkg/logger"
+	"pasargamex/pkg/utils"
 )
 
 type ReviewUseCase struct {
@@ -73,8 +75,8 @@ func (uc *ReviewUseCase) CreateReview(ctx context.Context, reviewerID string, in
 	
 	// Update rating user yang di-review
 	if err := uc.updateUserRating(ctx, targetID, reviewType, input.Rating); err != nil {
-		// Log error tapi jangan gagalkan operasi
-		// TODO: Implement logger
+		// Log error but don't fail the operation
+		logger.Error("Failed to update user rating for user %s: %v", targetID, err)
 	}
 	
 	return review, nil
@@ -102,12 +104,10 @@ func (uc *ReviewUseCase) ListReviews(ctx context.Context, userID, type_ string, 
 	// Hanya tampilkan review aktif
 	filter["status"] = "active"
 	
-	offset := (page - 1) * limit
-	if offset < 0 {
-		offset = 0
-	}
+	// Use standardized pagination
+	pagination := utils.NewPaginationParams(page, limit)
 	
-	return uc.reviewRepo.List(ctx, filter, limit, offset)
+	return uc.reviewRepo.List(ctx, filter, pagination.PageSize, pagination.Offset)
 }
 
 func (uc *ReviewUseCase) ReportReview(ctx context.Context, reporterID, reviewID, reason, description string) (*entity.ReviewReport, error) {
@@ -140,8 +140,8 @@ func (uc *ReviewUseCase) ReportReview(ctx context.Context, reporterID, reviewID,
 	review.Status = "reported" // Ubah status jika perlu
 	
 	if err := uc.reviewRepo.Update(ctx, review); err != nil {
-		// Log error tapi jangan gagalkan operasi
-		// TODO: Implement logger
+		// Log error but don't fail the operation
+		logger.Error("Failed to update review status after reporting review ID %s: %v", reviewID, err)
 	}
 	
 	return report, nil
@@ -195,12 +195,10 @@ func (uc *ReviewUseCase) ListReportedReviews(ctx context.Context, status string,
 		filter["status"] = status
 	}
 	
-	offset := (page - 1) * limit
-	if offset < 0 {
-		offset = 0
-	}
+	// Use standardized pagination
+	pagination := utils.NewPaginationParams(page, limit)
 	
-	return uc.reviewRepo.ListReports(ctx, filter, limit, offset)
+	return uc.reviewRepo.ListReports(ctx, filter, pagination.PageSize, pagination.Offset)
 }
 
 func (uc *ReviewUseCase) ResolveReport(ctx context.Context, adminID, reportID, status string) (*entity.ReviewReport, error) {

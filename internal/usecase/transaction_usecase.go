@@ -7,6 +7,8 @@ import (
 	"pasargamex/internal/domain/entity"
 	"pasargamex/internal/domain/repository"
 	"pasargamex/pkg/errors"
+	"pasargamex/pkg/logger"
+	"pasargamex/pkg/utils"
 )
 
 // FeeCalculator adalah interface untuk menghitung biaya transaksi
@@ -128,7 +130,7 @@ func (uc *TransactionUseCase) CreateTransaction(ctx context.Context, buyerID str
 	}
 	
 	if err := uc.transactionRepo.CreateLog(ctx, log); err != nil {
-		// Log error tapi jangan gagalkan operasi
+		logger.Error("Failed to create transaction log for transaction %s: %v", transaction.ID, err)
 	}
 	
 	return transaction, nil
@@ -171,14 +173,11 @@ func (uc *TransactionUseCase) ListTransactions(ctx context.Context, userID, role
 		role = "buyer"
 	}
 	
-	// Hitung offset
-	offset := (page - 1) * limit
-	if offset < 0 {
-		offset = 0
-	}
+	// Use standardized pagination
+	pagination := utils.NewPaginationParams(page, limit)
 	
 	// List transaksi
-	transactions, total, err := uc.transactionRepo.ListByUserID(ctx, userID, role, status, limit, offset)
+	transactions, total, err := uc.transactionRepo.ListByUserID(ctx, userID, role, status, pagination.PageSize, pagination.Offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -255,9 +254,9 @@ func (uc *TransactionUseCase) ProcessPayment(ctx context.Context, userID, transa
 	}
 	
 	if err := uc.transactionRepo.CreateLog(ctx, log); err != nil {
-		// Log error tapi jangan gagalkan operasi
+		logger.Error("Failed to create payment log for transaction %s: %v", transaction.ID, err)
 	}
-	
+
 	return transaction, nil
 }
 
@@ -300,7 +299,7 @@ func (uc *TransactionUseCase) AssignMiddleman(ctx context.Context, adminID, tran
 	}
 	
 	if err := uc.transactionRepo.CreateLog(ctx, log); err != nil {
-		// Log error tapi jangan gagalkan operasi
+		logger.Error("Failed to create middleman assignment log for transaction %s: %v", transaction.ID, err)
 	}
 	
 	return transaction, nil
@@ -347,28 +346,27 @@ func (uc *TransactionUseCase) VerifyAndCompleteMiddleman(ctx context.Context, ad
 	}
 	
 	if err := uc.transactionRepo.CreateLog(ctx, log); err != nil {
-		// Log error tapi jangan gagalkan operasi
+		logger.Error("Failed to create middleman completion log for transaction %s: %v", transaction.ID, err)
 	}
 	
 	return transaction, nil
 }
 
 func (uc *TransactionUseCase) GetTransactionLogs(ctx context.Context, userID, transactionID string) ([]*entity.TransactionLog, error) {
-	// Validasi transaksi dan akses
-	transaction, err := uc.GetTransactionByID(ctx, userID, transactionID)
-	if err != nil {
-		return nil, err
-	}
+    // Validasi transaksi dan akses
+    _, err := uc.GetTransactionByID(ctx, userID, transactionID)
+    if err != nil {
+        return nil, err
+    }
+    
 	
-	// Jika sudah melewati GetTransactionByID, berarti user memiliki akses
-	
-	// Ambil logs
-	logs, err := uc.transactionRepo.ListLogsByTransactionID(ctx, transactionID)
-	if err != nil {
-		return nil, errors.Internal("Failed to get transaction logs", err)
-	}
-	
-	return logs, nil
+    // Ambil logs
+    logs, err := uc.transactionRepo.ListLogsByTransactionID(ctx, transactionID)
+    if err != nil {
+        return nil, errors.Internal("Failed to get transaction logs", err)
+    }
+    
+    return logs, nil
 }
 
 // CancelTransaction untuk membatalkan transaksi
@@ -437,7 +435,7 @@ func (uc *TransactionUseCase) CancelTransaction(ctx context.Context, userID, tra
 	}
 	
 	if err := uc.transactionRepo.CreateLog(ctx, log); err != nil {
-		// Log error tapi jangan gagalkan operasi
+		logger.Error("Failed to create cancellation log for transaction %s: %v", transaction.ID, err)
 	}
 	
 	return transaction, nil
@@ -496,7 +494,7 @@ func (uc *TransactionUseCase) CreateDispute(ctx context.Context, userID, transac
 	}
 	
 	if err := uc.transactionRepo.CreateLog(ctx, log); err != nil {
-		// Log error tapi jangan gagalkan operasi
+		logger.Error("Failed to create dispute log for transaction %s: %v", transaction.ID, err)
 	}
 	
 	return transaction, nil
@@ -547,7 +545,7 @@ func (uc *TransactionUseCase) ResolveDispute(ctx context.Context, adminID, trans
 	}
 	
 	if err := uc.transactionRepo.CreateLog(ctx, log); err != nil {
-		// Log error tapi jangan gagalkan operasi
+		logger.Error("Failed to create dispute resolution log for transaction %s: %v", transaction.ID, err)
 	}
 	
 	return transaction, nil
@@ -590,7 +588,7 @@ func (uc *TransactionUseCase) ConfirmDelivery(ctx context.Context, buyerID, tran
 	}
 	
 	if err := uc.transactionRepo.CreateLog(ctx, log); err != nil {
-		// Log error tapi jangan gagalkan operasi
+		logger.Error("Failed to create delivery confirmation log for transaction %s: %v", transaction.ID, err)
 	}
 	
 	return transaction, nil
@@ -622,7 +620,9 @@ func (uc *TransactionUseCase) isValidStatusTransition(currentStatus, newStatus, 
 			"cancelled": {true, []string{"admin"}},
 		},
 	}
-	
+	    if deliveryMethod == "instant" && currentStatus == "awaiting_payment" && newStatus == "completed" {
+        return true // Instant delivery can go directly to completed after payment
+    }
 	// Periksa jika transisi valid
 	if transition, exists := validTransitions[currentStatus][newStatus]; exists {
 		// Periksa apakah role user diizinkan
@@ -637,40 +637,47 @@ func (uc *TransactionUseCase) isValidStatusTransition(currentStatus, newStatus, 
 }
 
 func (uc *TransactionUseCase) ListAdminTransactions(ctx context.Context, adminID string, filter map[string]interface{}, page, limit int) ([]*entity.Transaction, int64, error) {
-    // Validasi admin
-    // TODO: Implement proper admin validation
-    
-    // Calculate offset
-    offset := (page - 1) * limit
-    if offset < 0 {
-        offset = 0
-    }
-    
-    // Get transactions from repository
-    transactions, total, err := uc.transactionRepo.List(ctx, filter, limit, offset)
-    if err != nil {
-        return nil, 0, errors.Internal("Failed to list transactions", err)
-    }
-    
-    return transactions, total, nil
+	// Validasi admin
+	user, err := uc.userRepo.GetByID(ctx, adminID)
+	if err != nil {
+		return nil, 0, errors.NotFound("Admin user", err)
+	}
+	
+	if user.Role != "admin" {
+		return nil, 0, errors.Forbidden("Only admin can access this resource", nil)
+	}
+	
+	// Use standardized pagination
+	pagination := utils.NewPaginationParams(page, limit)
+	
+	// Get transactions from repository
+	transactions, total, err := uc.transactionRepo.List(ctx, filter, pagination.PageSize, pagination.Offset)
+	if err != nil {
+		return nil, 0, errors.Internal("Failed to list transactions", err)
+	}
+	
+	return transactions, total, nil
 }
 
-// ListPendingMiddlemanTransactions untuk admin melihat transaksi yang membutuhkan middleman
 func (uc *TransactionUseCase) ListPendingMiddlemanTransactions(ctx context.Context, adminID string, page, limit int) ([]*entity.Transaction, int64, error) {
-    // Validasi admin
-    // TODO: Implement proper admin validation
-    
-    // Calculate offset
-    offset := (page - 1) * limit
-    if offset < 0 {
-        offset = 0
-    }
-    
-    // Get pending middleman transactions from repository
-    transactions, total, err := uc.transactionRepo.ListPendingMiddlemanTransactions(ctx, limit, offset)
-    if err != nil {
-        return nil, 0, errors.Internal("Failed to list pending middleman transactions", err)
-    }
-    
-    return transactions, total, nil
+	// Validasi admin
+	user, err := uc.userRepo.GetByID(ctx, adminID)
+	if err != nil {
+		return nil, 0, errors.NotFound("Admin user", err)
+	}
+	
+	if user.Role != "admin" {
+		return nil, 0, errors.Forbidden("Only admin can access this resource", nil)
+	}
+	
+	// Use standardized pagination
+	pagination := utils.NewPaginationParams(page, limit)
+	
+	// Get pending middleman transactions from repository
+	transactions, total, err := uc.transactionRepo.ListPendingMiddlemanTransactions(ctx, pagination.PageSize, pagination.Offset)
+	if err != nil {
+		return nil, 0, errors.Internal("Failed to list pending middleman transactions", err)
+	}
+	
+	return transactions, total, nil
 }
