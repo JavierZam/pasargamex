@@ -22,4 +22,5 @@ type TransactionRepository interface {
 	
 	// Statistics methods
 	GetTransactionStats(ctx context.Context, userID string, period string) (map[string]interface{}, error)
+	HasCompletedTransaction(ctx context.Context, userID, productID string) (bool, error)
 }

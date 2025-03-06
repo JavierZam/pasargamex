@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"log"
+	"net/http" // Add this import
 	"os"
+	"strings" // Add this import
 
 	"cloud.google.com/go/firestore"
 	"github.com/labstack/echo/v4"
@@ -72,7 +74,7 @@ func main() {
 	authUseCase := usecase.NewAuthUseCase(userRepo, firebaseAuthClient)
 	userUseCase := usecase.NewUserUseCase(userRepo, firebaseAuthClient)
 	gameTitleUseCase := usecase.NewGameTitleUseCase(gameTitleRepo)
-	productUseCase := usecase.NewProductUseCase(productRepo, gameTitleRepo, userRepo)
+	productUseCase := usecase.NewProductUseCase(productRepo, gameTitleRepo, userRepo, transactionRepo)
 	reviewUseCase := usecase.NewReviewUseCase(reviewRepo, userRepo)
 	transactionUseCase := usecase.NewTransactionUseCase(transactionRepo, productRepo, userRepo)
 
@@ -99,6 +101,42 @@ func main() {
 	e.GET("/health", func(c echo.Context) error {
 		return c.JSON(200, map[string]string{"status": "ok"})
 	})
+	
+	e.GET("/v1/debug/me", func(c echo.Context) error {
+		// Get the Authorization header
+		authHeader := c.Request().Header.Get("Authorization")
+		if authHeader == "" {
+			return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+				"error": "No authorization header",
+			})
+		}
+
+		// Check if the Authorization header has the right format
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+				"error": "Invalid authorization format",
+			})
+		}
+
+		// Extract the token
+		idToken := parts[1]
+
+		// Verify the token
+		token, err := authClient.VerifyIDToken(context.Background(), idToken)
+		if err != nil {
+			return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+				"error": "Invalid token",
+				"details": err.Error(),
+			})
+		}
+
+		// Return the user ID from the token
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"uid": token.UID,
+			"token_verified": true,
+		})
+	}, authMiddleware.Authenticate)
 	
 	// Setup routers
 	router.Setup(e, authMiddleware, adminMiddleware)

@@ -144,14 +144,21 @@ func (h *ProductHandler) UpdateProduct(c echo.Context) error {
 }
 
 func (h *ProductHandler) GetProduct(c echo.Context) error {
-	id := c.Param("id")
+    id := c.Param("id")
 
-	product, err := h.productUseCase.GetProductByID(c.Request().Context(), id)
-	if err != nil {
-		return response.Error(c, err)
-	}
+    // Get current user ID from context, defaulting to empty string if not found
+    var currentUserID string
+    if uid, ok := c.Get("uid").(string); ok && uid != "" {
+        currentUserID = uid
+    }
 
-	return response.Success(c, product)
+    // Call use case with the user ID (might be empty)
+    product, err := h.productUseCase.GetProductByID(c.Request().Context(), id, currentUserID)
+    if err != nil {
+        return response.Error(c, err)
+    }
+
+    return response.Success(c, product)
 }
 
 func (h *ProductHandler) ListProducts(c echo.Context) error {

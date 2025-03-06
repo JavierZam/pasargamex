@@ -23,11 +23,6 @@ func SetupTransactionHandler(transactionUseCase *usecase.TransactionUseCase) {
 	transactionHandler = NewTransactionHandler(transactionUseCase)
 }
 
-type resolveDisputeRequest struct {
-	Resolution string `json:"resolution" validate:"required"`
-	Refund     bool   `json:"refund"`
-}
-
 type createTransactionRequest struct {
 	ProductID      string `json:"product_id" validate:"required"`
 	DeliveryMethod string `json:"delivery_method" validate:"required,oneof=instant middleman"`

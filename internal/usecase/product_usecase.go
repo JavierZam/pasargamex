@@ -14,17 +14,21 @@ type ProductUseCase struct {
 	productRepo   repository.ProductRepository
 	gameTitleRepo repository.GameTitleRepository
 	userRepo      repository.UserRepository
+	transactionRepo repository.TransactionRepository
 }
 
 func NewProductUseCase(
 	productRepo repository.ProductRepository,
 	gameTitleRepo repository.GameTitleRepository,
 	userRepo repository.UserRepository,
+	transactionRepo repository.TransactionRepository,
+
 ) *ProductUseCase {
 	return &ProductUseCase{
 		productRepo:   productRepo,
 		gameTitleRepo: gameTitleRepo,
 		userRepo:      userRepo,
+		transactionRepo: transactionRepo,
 	}
 }
 
@@ -193,20 +197,43 @@ func (uc *ProductUseCase) UpdateProduct(ctx context.Context, id string, sellerID
 	return product, nil
 }
 
-func (uc *ProductUseCase) GetProductByID(ctx context.Context, id string) (*entity.Product, error) {
-	product, err := uc.productRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
-	// Increment view counter (async)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = uc.productRepo.IncrementViews(ctx, id)
-	}()
-
-	return product, nil
+func (uc *ProductUseCase) GetProductByID(ctx context.Context, id string, currentUserID string) (*entity.Product, error) {
+    log.Printf("GetProductByID called with id=%s, currentUserID=%s", id, currentUserID)
+    
+    product, err := uc.productRepo.GetByID(ctx, id)
+    if err != nil {
+        log.Printf("Error getting product: %v", err)
+        return nil, err
+    }
+    
+    log.Printf("Product found: id=%s, sellerID=%s, hasCredentials=%v", 
+        product.ID, product.SellerID, product.Credentials != nil)
+    
+    // Check if user is seller
+    isSeller := product.SellerID == currentUserID
+    log.Printf("Current user is seller: %v", isSeller)
+    
+    if isSeller {
+        log.Printf("Returning product with credentials to seller")
+        return product, nil
+    }
+    
+    // Check if buyer has completed transaction
+    if currentUserID != "" {
+        hasCompletedTransaction, err := uc.transactionRepo.HasCompletedTransaction(ctx, currentUserID, id)
+        log.Printf("User has completed transaction: %v, err: %v", hasCompletedTransaction, err)
+        
+        if err == nil && hasCompletedTransaction {
+            log.Printf("Returning product with credentials to buyer with completed transaction")
+            return product, nil
+        }
+    }
+    
+    // Create copy without credentials for everyone else
+    log.Printf("Hiding credentials for non-seller/non-buyer user")
+    productCopy := *product 
+    productCopy.Credentials = nil
+    return &productCopy, nil
 }
 
 func (uc *ProductUseCase) ListProducts(ctx context.Context, gameTitleID, productType, status string, minPrice, maxPrice float64, sort string, page, limit int) ([]*entity.Product, int64, error) {

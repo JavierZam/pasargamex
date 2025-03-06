@@ -284,3 +284,29 @@ func (r *firestoreTransactionRepository) GetTransactionStats(ctx context.Context
 		"pendingTransactions": 0,
 	}, nil
 }
+
+func (r *firestoreTransactionRepository) HasCompletedTransaction(ctx context.Context, userID, productID string) (bool, error) {
+    log.Printf("Checking if user %s has completed transaction for product %s", userID, productID)
+    
+    query := r.client.Collection("transactions").
+        Where("buyerId", "==", userID).
+        Where("productId", "==", productID).
+        Where("status", "==", "completed").
+        Where("paymentStatus", "==", "paid").
+        Limit(1)
+
+    iter := query.Documents(ctx)
+    doc, err := iter.Next()
+    
+    if err != nil {
+        if err == iterator.Done {
+            log.Printf("No completed transaction found")
+            return false, nil
+        }
+        log.Printf("Error checking completed transaction: %v", err)
+        return false, err
+    }
+
+    log.Printf("Completed transaction found: %v", doc.Ref.ID)
+    return true, nil
+}

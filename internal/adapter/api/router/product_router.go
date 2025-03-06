@@ -7,7 +7,6 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// SetupProductRouter initializes product routes - updated version
 func SetupProductRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddleware *middleware.AdminMiddleware) {
     // Get handlers from DI
     productHandler := handler.GetProductHandler()
@@ -16,7 +15,11 @@ func SetupProductRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware,
     products := e.Group("/v1/products")
     products.GET("", productHandler.ListProducts)
     e.GET("/v1/products/search", productHandler.SearchProducts)
-    products.GET("/:id", productHandler.GetProduct)
+    
+    // Authenticated product detail route
+    authenticated := e.Group("/v1/products")
+    authenticated.Use(authMiddleware.Authenticate)
+    authenticated.GET("/:id", productHandler.GetProduct)
 
     // Protected product routes (require authentication)
     myProducts := e.Group("/v1/my-products")
