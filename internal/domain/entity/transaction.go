@@ -19,7 +19,7 @@ type Transaction struct {
 	PaymentDetails    map[string]interface{} `json:"payment_details,omitempty" firestore:"paymentDetails,omitempty"`
 	
 	// Data untuk pengiriman digital
-	Credentials       map[string]interface{} `json:"credentials,omitempty" firestore:"credentials,omitempty"` // Hanya ditampilkan ke buyer setelah pembayaran
+	Credentials       map[string]interface{} `json:"-" firestore:"credentials,omitempty"` // Hanya ditampilkan ke buyer setelah pembayaran
 	
 	// Untuk middleman mode
 	AdminID           string                 `json:"admin_id,omitempty" firestore:"adminId,omitempty"` // Admin yang menangani transaksi

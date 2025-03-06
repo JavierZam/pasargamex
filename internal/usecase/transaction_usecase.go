@@ -136,37 +136,22 @@ func (uc *TransactionUseCase) CreateTransaction(ctx context.Context, buyerID str
 	return transaction, nil
 }
 
-func (uc *TransactionUseCase) GetTransactionByID(ctx context.Context, userID, transactionID string) (*entity.Transaction, error) {
-	transaction, err := uc.transactionRepo.GetByID(ctx, transactionID)
-	if err != nil {
-		return nil, err
-	}
-	
-	// Validasi bahwa user adalah buyer atau seller
-	if transaction.BuyerID != userID && transaction.SellerID != userID && transaction.AdminID != userID {
-		return nil, errors.Forbidden("You don't have permission to view this transaction", nil)
-	}
-	
-	// Sembunyikan credentials jika belum dibayar dan bukan admin
-	if transaction.PaymentStatus != "paid" && transaction.AdminID != userID {
-		// Buat salinan untuk menghindari modifikasi objek asli
-		transactionCopy := *transaction
-		transactionCopy.Credentials = nil
-		return &transactionCopy, nil
-	}
-	
-	// Sembunyikan credentials jika bukan buyer dan bukan admin
-	if transaction.BuyerID != userID && transaction.AdminID != userID {
-		// Buat salinan untuk menghindari modifikasi objek asli
-		transactionCopy := *transaction
-		transactionCopy.Credentials = nil
-		return &transactionCopy, nil
-	}
-	
-	return transaction, nil
+func (uc *TransactionUseCase) GetTransactionByID(ctx context.Context, userID, transactionID string) (interface{}, error) {
+    transaction, err := uc.transactionRepo.GetByID(ctx, transactionID)
+    if err != nil {
+        return nil, err
+    }
+    
+    // Validate that user is buyer or seller
+    if transaction.BuyerID != userID && transaction.SellerID != userID {
+        return nil, errors.Forbidden("You don't have permission to view this transaction", nil)
+    }
+    
+    // This line should be calling your prepare function
+    return uc.prepareTransactionResponse(transaction, userID), nil
 }
 
-func (uc *TransactionUseCase) ListTransactions(ctx context.Context, userID, role, status string, page, limit int) ([]*entity.Transaction, int64, error) {
+func (uc *TransactionUseCase) ListTransactions(ctx context.Context, userID, role, status string, page, limit int) ([]interface{}, int64, error) {
 	// Validasi role
 	if role != "buyer" && role != "seller" {
 		// Default ke buyer jika tidak dispesifikasi
@@ -182,17 +167,12 @@ func (uc *TransactionUseCase) ListTransactions(ctx context.Context, userID, role
 		return nil, 0, err
 	}
 	
-	// Proses hasil untuk menyembunyikan credentials sesuai kebutuhan
-	for i, transaction := range transactions {
-		if transaction.BuyerID != userID || transaction.PaymentStatus != "paid" {
-			// Buat salinan untuk menghindari modifikasi objek asli
-			transactionCopy := *transaction
-			transactionCopy.Credentials = nil
-			transactions[i] = &transactionCopy
-		}
-	}
-	
-	return transactions, total, nil
+    responses := make([]interface{}, len(transactions))
+    for i, transaction := range transactions {
+        responses[i] = uc.prepareTransactionResponse(transaction, userID)
+    }
+    
+    return responses, total, nil
 }
 
 // ProcessPayment yang diperbarui untuk menangani instant dan middleman berbeda
@@ -680,4 +660,57 @@ func (uc *TransactionUseCase) ListPendingMiddlemanTransactions(ctx context.Conte
 	}
 	
 	return transactions, total, nil
+}
+
+func (uc *TransactionUseCase) prepareTransactionResponse(transaction *entity.Transaction, userID string) interface{} {
+    // Create a fresh structure without the json:"-" tag interference
+    type TransactionResponse struct {
+        ID                string                 `json:"id"`
+        ProductID         string                 `json:"product_id"`
+        SellerID          string                 `json:"seller_id"`
+        BuyerID           string                 `json:"buyer_id"`
+        Status            string                 `json:"status"`
+        DeliveryMethod    string                 `json:"delivery_method"`
+        Amount            float64                `json:"amount"`
+        Fee               float64                `json:"fee"`
+        TotalAmount       float64                `json:"total_amount"`
+        PaymentMethod     string                 `json:"payment_method,omitempty"`
+        PaymentStatus     string                 `json:"payment_status"`
+        PaymentDetails    map[string]interface{} `json:"payment_details,omitempty"`
+        AdminID           string                 `json:"admin_id,omitempty"`
+        MiddlemanStatus   string                 `json:"middleman_status,omitempty"`
+        Notes             string                 `json:"notes,omitempty"`
+        // Include other fields as needed
+        
+        // Add credentials only if needed
+        Credentials       map[string]interface{} `json:"credentials,omitempty"`
+    }
+    
+    // Create base response
+    response := TransactionResponse{
+        ID:                transaction.ID,
+        ProductID:         transaction.ProductID,
+        SellerID:          transaction.SellerID,
+        BuyerID:           transaction.BuyerID,
+        Status:            transaction.Status,
+        DeliveryMethod:    transaction.DeliveryMethod,
+        Amount:            transaction.Amount,
+        Fee:               transaction.Fee,
+        TotalAmount:       transaction.TotalAmount,
+        PaymentMethod:     transaction.PaymentMethod,
+        PaymentStatus:     transaction.PaymentStatus,
+        PaymentDetails:    transaction.PaymentDetails,
+        AdminID:           transaction.AdminID,
+        MiddlemanStatus:   transaction.MiddlemanStatus,
+        Notes:             transaction.Notes,
+        // Copy other fields
+    }
+    
+    // Add credentials if appropriate
+    if (transaction.SellerID == userID) || 
+       (transaction.BuyerID == userID && transaction.PaymentStatus == "paid") {
+        response.Credentials = transaction.Credentials
+    }
+    
+    return response
 }
