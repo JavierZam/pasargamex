@@ -210,7 +210,7 @@ func (uc *ProductUseCase) GetProductByID(ctx context.Context, id string, current
         product.ID, product.SellerID, product.Credentials != nil)
     
     // Check if user is seller
-    isSeller := product.SellerID == currentUserID
+    isSeller := currentUserID != "" && product.SellerID == currentUserID
     log.Printf("Current user is seller: %v", isSeller)
     
     if isSeller {

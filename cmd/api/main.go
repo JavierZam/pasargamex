@@ -36,7 +36,7 @@ func main() {
 
 	serviceAccountPath := os.Getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
 	if serviceAccountPath == "" {
-		serviceAccountPath = "./pasargamex-firebase-adminsdk-fbsvc-2e1876a42a.json"
+		serviceAccountPath = "./pasargamex-458303-firebase-adminsdk-fbsvc-f079266cd9.json"
 	}
 
 	// Setup Firebase App

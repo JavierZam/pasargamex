@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"google.golang.org/api/iterator"
 
 	"pasargamex/internal/domain/entity"
 	"pasargamex/internal/domain/repository"
@@ -108,4 +109,45 @@ func (r *firestoreUserRepository) Update(ctx context.Context, user *entity.User)
 func (r *firestoreUserRepository) Delete(ctx context.Context, id string) error {
 	_, err := r.client.Collection("users").Doc(id).Delete(ctx)
 	return err
+}
+
+func (r *firestoreUserRepository) FindByField(ctx context.Context, field, value string, limit, offset int) ([]*entity.User, int64, error) {
+    query := r.client.Collection("users").Where(field, "==", value)
+    
+    // Get total count
+    countDocs, err := query.Documents(ctx).GetAll()
+    if err != nil {
+        return nil, 0, err
+    }
+    total := int64(len(countDocs))
+    
+    // Apply pagination
+    if limit > 0 {
+        query = query.Limit(limit)
+    }
+    if offset > 0 {
+        query = query.Offset(offset)
+    }
+    
+    // Execute query
+    iter := query.Documents(ctx)
+    var users []*entity.User
+    
+    for {
+        doc, err := iter.Next()
+        if err == iterator.Done {
+            break
+        }
+        if err != nil {
+            return nil, 0, err
+        }
+        
+        var user entity.User
+        if err := doc.DataTo(&user); err != nil {
+            return nil, 0, err
+        }
+        users = append(users, &user)
+    }
+    
+    return users, total, nil
 }

@@ -73,9 +73,15 @@ func (uc *UserUseCase) GetUserProfile(ctx context.Context, userId string) (*enti
 }
 
 func (uc *UserUseCase) UpdatePassword(ctx context.Context, userId, currentPassword, newPassword string) error {
-    // Dalam implementasi lengkap, kita perlu verifikasi current password
-    // Namun Firebase Admin SDK tidak memiliki API untuk verifikasi password
-    // Jadi kita langsung update password
+    user, err := uc.userRepo.GetByID(ctx, userId)
+    if err != nil {
+        return errors.NotFound("User", err)
+    }
+    
+    _, err = uc.firebaseAuth.SignInWithEmailPassword(user.Email, currentPassword)
+    if err != nil {
+        return errors.Unauthorized("Current password is incorrect", err)
+    }
     
     if err := uc.firebaseAuth.UpdateUserPassword(ctx, userId, newPassword); err != nil {
         return errors.Internal("Failed to update password", err)

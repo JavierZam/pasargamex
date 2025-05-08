@@ -41,6 +41,19 @@ func (uc *AuthUseCase) Register(ctx context.Context, input RegisterInput) (*Auth
         return nil, errors.BadRequest("Email already in use", nil)
     }
 
+        users, _, err := uc.userRepo.FindByField(ctx, "username", input.Username, 1, 0)
+    if err == nil && len(users) > 0 {
+        return nil, errors.BadRequest("Username already in use", nil)
+    }
+    
+    // Add check for phone if provided
+    if input.Phone != "" {
+        users, _, err := uc.userRepo.FindByField(ctx, "phone", input.Phone, 1, 0)
+        if err == nil && len(users) > 0 {
+            return nil, errors.BadRequest("Phone number already in use", nil)
+        }
+    }
+
     // Create user in Firebase Auth
     uid, err := uc.firebaseAuth.CreateUser(ctx, input.Email, input.Password, input.Username)
     if err != nil {

@@ -16,10 +16,8 @@ func SetupProductRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware,
     products.GET("", productHandler.ListProducts)
     e.GET("/v1/products/search", productHandler.SearchProducts)
     
-    // Authenticated product detail route
-    authenticated := e.Group("/v1/products")
-    authenticated.Use(authMiddleware.Authenticate)
-    authenticated.GET("/:id", productHandler.GetProduct)
+    // Make product detail public
+    e.GET("/v1/products/:id", productHandler.GetProduct)
 
     // Protected product routes (require authentication)
     myProducts := e.Group("/v1/my-products")
