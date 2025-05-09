@@ -141,3 +141,7 @@ func (uc *UserUseCase) ProcessVerification(ctx context.Context, adminID, userID,
 	
 	return user, nil
 }
+
+func (uc *UserUseCase) GetUserRepository() repository.UserRepository {
+    return uc.userRepo
+}

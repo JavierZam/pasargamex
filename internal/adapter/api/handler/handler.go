@@ -15,19 +15,19 @@ var (
 
 // Setup initializes all handlers
 func Setup(
-	authUseCase *usecase.AuthUseCase,
-	userUseCase *usecase.UserUseCase,
-	gameTitleUseCase *usecase.GameTitleUseCase,
-	productUseCase *usecase.ProductUseCase,
-	reviewUseCase *usecase.ReviewUseCase,
-	transactionUseCase *usecase.TransactionUseCase,
+    authUseCase *usecase.AuthUseCase,
+    userUseCase *usecase.UserUseCase,
+    gameTitleUseCase *usecase.GameTitleUseCase,
+    productUseCase *usecase.ProductUseCase,
+    reviewUseCase *usecase.ReviewUseCase,
+    transactionUseCase *usecase.TransactionUseCase,
 ) {
-	authHandler = NewAuthHandler(authUseCase)
-	userHandler = NewUserHandler(userUseCase)
-	gameTitleHandler = NewGameTitleHandler(gameTitleUseCase)
-	productHandler = NewProductHandler(productUseCase)
-	reviewHandler = NewReviewHandler(reviewUseCase)
-	transactionHandler = NewTransactionHandler(transactionUseCase)
+    authHandler = NewAuthHandler(authUseCase)
+    userHandler = NewUserHandler(userUseCase)
+    gameTitleHandler = NewGameTitleHandler(gameTitleUseCase)
+    productHandler = NewProductHandler(productUseCase)
+    reviewHandler = NewReviewHandler(reviewUseCase)
+    transactionHandler = NewTransactionHandler(transactionUseCase)
 }
 
 // GetAuthHandler returns the auth handler

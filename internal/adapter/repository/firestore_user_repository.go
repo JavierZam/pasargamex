@@ -112,42 +112,71 @@ func (r *firestoreUserRepository) Delete(ctx context.Context, id string) error {
 }
 
 func (r *firestoreUserRepository) FindByField(ctx context.Context, field, value string, limit, offset int) ([]*entity.User, int64, error) {
-    query := r.client.Collection("users").Where(field, "==", value)
-    
-    // Get total count
-    countDocs, err := query.Documents(ctx).GetAll()
-    if err != nil {
-        return nil, 0, err
-    }
-    total := int64(len(countDocs))
-    
-    // Apply pagination
-    if limit > 0 {
-        query = query.Limit(limit)
-    }
-    if offset > 0 {
-        query = query.Offset(offset)
-    }
-    
-    // Execute query
-    iter := query.Documents(ctx)
-    var users []*entity.User
-    
-    for {
-        doc, err := iter.Next()
-        if err == iterator.Done {
-            break
-        }
-        if err != nil {
-            return nil, 0, err
-        }
-        
-        var user entity.User
-        if err := doc.DataTo(&user); err != nil {
-            return nil, 0, err
-        }
-        users = append(users, &user)
-    }
-    
-    return users, total, nil
+	query := r.client.Collection("users").Where(field, "==", value)
+	
+	// Get total count
+	countDocs, err := query.Documents(ctx).GetAll()
+	if err != nil {
+		return nil, 0, err
+	}
+	total := int64(len(countDocs))
+	
+	// Apply pagination
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+	
+	// Execute query
+	iter := query.Documents(ctx)
+	var users []*entity.User
+	
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, 0, err
+		}
+		
+		var user entity.User
+		if err := doc.DataTo(&user); err != nil {
+			return nil, 0, err
+		}
+		users = append(users, &user)
+	}
+	
+	return users, total, nil
 }
+
+func (r *firestoreUserRepository) GetUserByRole(ctx context.Context, role string, limit int) ([]*entity.User) {
+	query := r.client.Collection("users").Where("role", "==", role).Limit(limit)
+	
+	iter := query.Documents(ctx)
+	var users []*entity.User
+	
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			log.Printf("Error getting user by role: %v", err)
+			return []*entity.User{}
+		}
+		
+		var user entity.User
+		if err := doc.DataTo(&user); err != nil {
+			log.Printf("Error parsing user data: %v", err)
+			continue
+		}
+		
+		users = append(users, &user)
+	}
+	
+	return users
+}
+

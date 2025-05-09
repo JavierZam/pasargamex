@@ -80,7 +80,7 @@ func main() {
 
 	// Setup handlers
 	handler.Setup(authUseCase, userUseCase, gameTitleUseCase, productUseCase, reviewUseCase, transactionUseCase)
-	handler.SetupHealthHandler(firebaseAuthClient)
+	handler.SetupDevTokenHandler(firebaseAuthClient, userRepo)
 
 	// Initialize Echo
 	e := echo.New()
@@ -140,6 +140,7 @@ func main() {
 	
 	// Setup routers
 	router.Setup(e, authMiddleware, adminMiddleware, authClient)
+	router.SetupDevRouter(e, cfg.Environment)
 	
 	// Start server
 	log.Printf("Starting server on port %s...", cfg.ServerPort)

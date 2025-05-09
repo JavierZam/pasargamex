@@ -28,6 +28,12 @@ type PaginatedResponse struct {
 	TotalPages int         `json:"totalPages"`
 }
 
+type CustomError struct {
+    Code    string
+    Message string
+    Status  int
+}
+
 // Success returns a success response with data
 func Success(c echo.Context, data interface{}) error {
 	return c.JSON(http.StatusOK, Response{
@@ -84,4 +90,16 @@ func Error(c echo.Context, err error) error {
 			Message: "An unexpected error occurred",
 		},
 	})
+}
+
+func (e *CustomError) Error() string {
+    return e.Message
+}
+
+func NewError(code, message string, status int) error {
+    return &CustomError{
+        Code:    code,
+        Message: message,
+        Status:  status,
+    }
 }
