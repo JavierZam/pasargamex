@@ -139,7 +139,7 @@ func main() {
 	}, authMiddleware.Authenticate)
 	
 	// Setup routers
-	router.Setup(e, authMiddleware, adminMiddleware)
+	router.Setup(e, authMiddleware, adminMiddleware, authClient)
 	
 	// Start server
 	log.Printf("Starting server on port %s...", cfg.ServerPort)

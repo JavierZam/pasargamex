@@ -4,10 +4,11 @@ import (
 	"pasargamex/internal/adapter/api/handler"
 	"pasargamex/internal/adapter/api/middleware"
 
+	"firebase.google.com/go/v4/auth"
 	"github.com/labstack/echo/v4"
 )
 
-func SetupProductRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddleware *middleware.AdminMiddleware) {
+func SetupProductRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddleware *middleware.AdminMiddleware, authClient *auth.Client) {
     // Get handlers from DI
     productHandler := handler.GetProductHandler()
     
@@ -16,8 +17,10 @@ func SetupProductRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware,
     products.GET("", productHandler.ListProducts)
     e.GET("/v1/products/search", productHandler.SearchProducts)
     
-    // Make product detail public
-    e.GET("/v1/products/:id", productHandler.GetProduct)
+    // Product detail route with optional authentication
+    productDetailGroup := e.Group("/v1/products")
+    productDetailGroup.Use(VerifyToken(authClient))
+    productDetailGroup.GET("/:id", productHandler.GetProduct)
 
     // Protected product routes (require authentication)
     myProducts := e.Group("/v1/my-products")

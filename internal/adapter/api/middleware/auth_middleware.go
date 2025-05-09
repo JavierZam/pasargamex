@@ -49,3 +49,13 @@ func (m *AuthMiddleware) Authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 		return next(c)
 	}
 }
+
+func (m *AuthMiddleware) GetUIDFromToken(ctx context.Context, token string) (string, error) {
+    // Verify the token
+    firebaseToken, err := m.authClient.VerifyIDToken(ctx, token)
+    if err != nil {
+        return "", err
+    }
+    
+    return firebaseToken.UID, nil
+}
