@@ -9,4 +9,6 @@ type FirebaseAuthClient interface {
     SignInWithEmailPassword(email, password string) (string, error)
     UpdateUserPassword(ctx context.Context, uid, newPassword string) error
     TestConnection(ctx context.Context) error
+    SignInWithEmailPasswordWithRefresh(email, password string) (string, string, error)
+    RefreshIdToken(refreshToken string) (string, string, error)
 }

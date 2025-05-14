@@ -1,6 +1,7 @@
 package firebase
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -209,3 +210,158 @@ func (f *FirebaseAuthClient) TestConnection(ctx context.Context) error {
 	// Tidak ada error tapi user ditemukan - unlikely scenario
 	return nil
 }
+
+func (f *FirebaseAuthClient) SignInWithEmailPasswordWithRefresh(email, password string) (string, string, error) {
+    if f.apiKey == "" {
+        return "", "", fmt.Errorf("Firebase API key is not set")
+    }
+
+    url := fmt.Sprintf("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=%s", f.apiKey)
+    
+    // Prepare request body
+    reqBody := fmt.Sprintf(`{"email":"%s","password":"%s","returnSecureToken":true}`, email, password)
+    
+    // Send request
+    req, err := http.NewRequest("POST", url, strings.NewReader(reqBody))
+    if err != nil {
+        return "", "", err
+    }
+    
+    req.Header.Set("Content-Type", "application/json")
+    
+    client := &http.Client{Timeout: 10 * time.Second}
+    resp, err := client.Do(req)
+    if err != nil {
+        return "", "", err
+    }
+    defer resp.Body.Close()
+    
+    body, err := ioutil.ReadAll(resp.Body)
+    if err != nil {
+        return "", "", err
+    }
+    
+    if resp.StatusCode != http.StatusOK {
+        return "", "", fmt.Errorf("firebase auth API error: %s", string(body))
+    }
+    
+    // Parse response
+    var result struct {
+        IDToken      string `json:"idToken"`
+        RefreshToken string `json:"refreshToken"`
+        LocalID      string `json:"localId"`
+    }
+    
+    if err := json.Unmarshal(body, &result); err != nil {
+        return "", "", err
+    }
+    
+    return result.IDToken, result.RefreshToken, nil
+}
+
+// Tambahkan metode untuk refresh token
+func (f *FirebaseAuthClient) RefreshIdToken(refreshToken string) (string, string, error) {
+    if f.apiKey == "" {
+        return "", "", fmt.Errorf("Firebase API key is not set")
+    }
+
+    url := fmt.Sprintf("https://securetoken.googleapis.com/v1/token?key=%s", f.apiKey)
+    
+    // Prepare request body
+    reqBody := fmt.Sprintf(`{"grant_type":"refresh_token","refresh_token":"%s"}`, refreshToken)
+    
+    // Send request
+    req, err := http.NewRequest("POST", url, strings.NewReader(reqBody))
+    if err != nil {
+        return "", "", err
+    }
+    
+    req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    
+    client := &http.Client{Timeout: 10 * time.Second}
+    resp, err := client.Do(req)
+    if err != nil {
+        return "", "", err
+    }
+    defer resp.Body.Close()
+    
+    body, err := ioutil.ReadAll(resp.Body)
+    if err != nil {
+        return "", "", err
+    }
+    
+    if resp.StatusCode != http.StatusOK {
+        return "", "", fmt.Errorf("firebase refresh token API error: %s", string(body))
+    }
+    
+    // Parse response
+    var result struct {
+        IDToken      string `json:"id_token"`
+        RefreshToken string `json:"refresh_token"`
+    }
+    
+    if err := json.Unmarshal(body, &result); err != nil {
+        return "", "", err
+    }
+    
+    return result.IDToken, result.RefreshToken, nil
+}
+
+func (f *FirebaseAuthClient) GenerateDevTokenPair(ctx context.Context, email string) (string, string, error) {
+    // Cari user berdasarkan email
+    user, err := f.client.GetUserByEmail(ctx, email)
+    if err != nil {
+        return "", "", fmt.Errorf("error getting user: %v", err)
+    }
+    
+    // Generate token custom
+    customToken, err := f.client.CustomToken(ctx, user.UID)
+    if err != nil {
+        return "", "", fmt.Errorf("error creating custom token: %v", err)
+    }
+    
+    // Exchange ke ID token jika API key tersedia
+    if f.apiKey == "" {
+        return customToken, "", fmt.Errorf("firebase API key not available, cannot exchange for ID token")
+    }
+    
+    // Struktur untuk request
+    reqData := struct {
+        Token             string `json:"token"`
+        ReturnSecureToken bool   `json:"returnSecureToken"`
+    }{
+        Token:             customToken,
+        ReturnSecureToken: true,
+    }
+    
+    reqBytes, err := json.Marshal(reqData)
+    if err != nil {
+        return "", "", fmt.Errorf("error marshaling request: %v", err)
+    }
+    
+    // Exchange custom token for ID token
+    url := fmt.Sprintf("https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=%s", f.apiKey)
+    resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBytes))
+    if err != nil {
+        return "", "", fmt.Errorf("error exchanging token: %v", err)
+    }
+    defer resp.Body.Close()
+    
+    if resp.StatusCode != http.StatusOK {
+        bodyBytes, _ := ioutil.ReadAll(resp.Body)
+        return "", "", fmt.Errorf("error response from Firebase: %s", string(bodyBytes))
+    }
+    
+    // Parse response
+    var result struct {
+        IDToken      string `json:"idToken"`
+        RefreshToken string `json:"refreshToken"`
+    }
+    
+    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+        return "", "", fmt.Errorf("error decoding response: %v", err)
+    }
+    
+    return result.IDToken, result.RefreshToken, nil
+}
+

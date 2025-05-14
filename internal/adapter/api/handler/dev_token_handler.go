@@ -1,7 +1,12 @@
 package handler
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -32,52 +37,140 @@ func GetDevTokenHandler() *DevTokenHandler {
 	return devTokenHandler
 }
 
-// GenerateUserToken menghasilkan token abadi untuk user biasa
+// GenerateUserToken generates tokens for a regular user for development
 func (h *DevTokenHandler) GenerateUserToken(c echo.Context) error {
+	// Hanya berfungsi di mode development
+	if c.Get("environment") != "development" {
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": "Endpoint not found",
+		})
+	}
+	
 	// Ambil user pertama dengan role user
-	query := h.userRepo.GetUserByRole(c.Request().Context(), "user", 1)
-	if len(query) == 0 {
+	users, total, err := h.userRepo.FindByField(c.Request().Context(), "role", "user", 1, 0)
+	if err != nil || total == 0 || len(users) == 0 {
 		return response.Error(c, response.NewError("USER_NOT_FOUND", "No regular user found", http.StatusNotFound))
 	}
 	
-	// Generate token
-	token, err := h.firebaseAuth.GenerateLongLivedToken(c.Request().Context(), query[0].ID)
+	user := users[0]
+	
+	// Generate token pair
+	token, refreshToken, err := h.firebaseAuth.GenerateDevTokenPair(c.Request().Context(), user.Email)
 	if err != nil {
-		return response.Error(c, err)
+		// Log error tapi jangan expose detail error ke response
+		log.Printf("Error generating token pair: %v", err)
+		
+		// Fallback ke metode lama jika error
+		customToken, err := h.firebaseAuth.GenerateLongLivedToken(c.Request().Context(), user.ID)
+		if err != nil {
+			return response.Error(c, err)
+		}
+		
+		return response.Success(c, map[string]interface{}{
+			"token": customToken,
+			"user": map[string]interface{}{
+				"id":       user.ID,
+				"email":    user.Email,
+				"username": user.Username,
+				"role":     user.Role,
+			},
+			"note": "Using fallback token method (custom token only). Might need to exchange for ID token manually.",
+		})
 	}
 	
+	// Token info untuk debugging
+	tokenInfo := parseJWTWithoutVerification(token)
+	expiryTime := time.Unix(tokenInfo["exp"].(int64), 0)
+	
 	return response.Success(c, map[string]interface{}{
-		"token": token,
+		"token":         token,
+		"refresh_token": refreshToken,
+		"expires_at":    expiryTime.Format(time.RFC3339),
+		"expires_in":    expiryTime.Sub(time.Now()).String(),
 		"user": map[string]interface{}{
-			"id": query[0].ID,
-			"email": query[0].Email,
-			"username": query[0].Username,
-			"role": query[0].Role,
+			"id":       user.ID,
+			"email":    user.Email,
+			"username": user.Username,
+			"role":     user.Role,
 		},
 	})
 }
 
-// GenerateAdminToken menghasilkan token abadi untuk admin
+// GenerateAdminToken generates tokens for an admin user for development
 func (h *DevTokenHandler) GenerateAdminToken(c echo.Context) error {
-	// Ambil user pertama dengan role admin
-	query := h.userRepo.GetUserByRole(c.Request().Context(), "admin", 1)
-	if len(query) == 0 {
+	// Hanya berfungsi di mode development
+	if c.Get("environment") != "development" {
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": "Endpoint not found",
+		})
+	}
+	
+	// Ambil admin pertama
+	users, total, err := h.userRepo.FindByField(c.Request().Context(), "role", "admin", 1, 0)
+	if err != nil || total == 0 || len(users) == 0 {
 		return response.Error(c, response.NewError("ADMIN_NOT_FOUND", "No admin user found", http.StatusNotFound))
 	}
 	
-	// Generate token
-	token, err := h.firebaseAuth.GenerateLongLivedToken(c.Request().Context(), query[0].ID)
+	user := users[0]
+	
+	// Generate token pair
+	token, refreshToken, err := h.firebaseAuth.GenerateDevTokenPair(c.Request().Context(), user.Email)
 	if err != nil {
-		return response.Error(c, err)
+		// Log error tapi jangan expose detail error ke response
+		log.Printf("Error generating token pair: %v", err)
+		
+		// Fallback ke metode lama jika error
+		customToken, err := h.firebaseAuth.GenerateLongLivedToken(c.Request().Context(), user.ID)
+		if err != nil {
+			return response.Error(c, err)
+		}
+		
+		return response.Success(c, map[string]interface{}{
+			"token": customToken,
+			"user": map[string]interface{}{
+				"id":       user.ID,
+				"email":    user.Email,
+				"username": user.Username,
+				"role":     user.Role,
+			},
+			"note": "Using fallback token method (custom token only). Might need to exchange for ID token manually.",
+		})
 	}
 	
+	// Token info untuk debugging
+	tokenInfo := parseJWTWithoutVerification(token)
+	expiryTime := time.Unix(tokenInfo["exp"].(int64), 0)
+	
 	return response.Success(c, map[string]interface{}{
-		"token": token,
+		"token":         token,
+		"refresh_token": refreshToken,
+		"expires_at":    expiryTime.Format(time.RFC3339),
+		"expires_in":    expiryTime.Sub(time.Now()).String(),
 		"user": map[string]interface{}{
-			"id": query[0].ID,
-			"email": query[0].Email,
-			"username": query[0].Username,
-			"role": query[0].Role,
+			"id":       user.ID,
+			"email":    user.Email,
+			"username": user.Username,
+			"role":     user.Role,
 		},
 	})
+}
+
+// Helper function to decode JWT without verification
+func parseJWTWithoutVerification(tokenString string) map[string]interface{} {
+	parts := strings.Split(tokenString, ".")
+	if len(parts) != 3 {
+		return map[string]interface{}{}
+	}
+	
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return map[string]interface{}{}
+	}
+	
+	var claims map[string]interface{}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return map[string]interface{}{}
+	}
+	
+	return claims
 }

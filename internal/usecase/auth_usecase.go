@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"pasargamex/internal/domain/entity"
@@ -30,10 +29,39 @@ type RegisterInput struct {
 }
 
 type AuthResult struct {
-	User  *entity.User
-	Token string
+    User         *entity.User
+    Token        string
+    RefreshToken string
 }
 
+// Modifikasi metode Login
+func (uc *AuthUseCase) Login(ctx context.Context, email, password string) (*AuthResult, error) {
+    // Gunakan metode login dengan refresh token
+    token, refreshToken, err := uc.firebaseAuth.SignInWithEmailPasswordWithRefresh(email, password)
+    if err != nil {
+        return nil, errors.Unauthorized("Invalid credentials", err)
+    }
+
+    // Verify token to get UID
+    uid, err := uc.firebaseAuth.VerifyToken(ctx, token)
+    if err != nil {
+        return nil, errors.Internal("Failed to verify token", err)
+    }
+
+    // Get user data
+    user, err := uc.userRepo.GetByID(ctx, uid)
+    if err != nil {
+        return nil, errors.NotFound("User", err)
+    }
+
+    return &AuthResult{
+        User:         user,
+        Token:        token,
+        RefreshToken: refreshToken,
+    }, nil
+}
+
+// Modifikasi metode Register untuk juga mengembalikan refresh token
 func (uc *AuthUseCase) Register(ctx context.Context, input RegisterInput) (*AuthResult, error) {
     // Check if email already exists
     existingUser, err := uc.userRepo.GetByEmail(ctx, input.Email)
@@ -41,7 +69,8 @@ func (uc *AuthUseCase) Register(ctx context.Context, input RegisterInput) (*Auth
         return nil, errors.BadRequest("Email already in use", nil)
     }
 
-        users, _, err := uc.userRepo.FindByField(ctx, "username", input.Username, 1, 0)
+    // Add check for username
+    users, _, err := uc.userRepo.FindByField(ctx, "username", input.Username, 1, 0)
     if err == nil && len(users) > 0 {
         return nil, errors.BadRequest("Username already in use", nil)
     }
@@ -78,67 +107,44 @@ func (uc *AuthUseCase) Register(ctx context.Context, input RegisterInput) (*Auth
         return nil, errors.Internal("Failed to create user record", err)
     }
 
-    // Generate ID token directly
-    token, err := uc.firebaseAuth.SignInWithEmailPassword(input.Email, input.Password)
+    // Generate token
+    token, refreshToken, err := uc.firebaseAuth.SignInWithEmailPasswordWithRefresh(input.Email, input.Password)
     if err != nil {
         return nil, errors.Internal("Failed to generate authentication token", err)
     }
 
     return &AuthResult{
-        User:  user,
-        Token: token,
+        User:         user,
+        Token:        token,
+        RefreshToken: refreshToken,
     }, nil
 }
 
-func (uc *AuthUseCase) Login(ctx context.Context, email, password string) (*AuthResult, error) {
-    // Gunakan metode login dengan email/password langsung
-    token, err := uc.firebaseAuth.SignInWithEmailPassword(email, password)
+// Tambahkan metode untuk refresh token
+func (uc *AuthUseCase) RefreshToken(ctx context.Context, refreshToken string) (*AuthResult, error) {
+    // Refresh token dengan Firebase
+    token, newRefreshToken, err := uc.firebaseAuth.RefreshIdToken(refreshToken)
     if err != nil {
-        // Pastikan error dilog dan dikembalikan dengan benar
-        log.Printf("Login failed: %v", err)
-        return nil, errors.Unauthorized("Invalid credentials", err)
+        return nil, errors.Unauthorized("Invalid refresh token", err)
     }
-
+    
     // Verify token to get UID
     uid, err := uc.firebaseAuth.VerifyToken(ctx, token)
     if err != nil {
-        log.Printf("Token verification failed: %v", err)
         return nil, errors.Internal("Failed to verify token", err)
     }
-
+    
     // Get user data
     user, err := uc.userRepo.GetByID(ctx, uid)
     if err != nil {
-        log.Printf("Failed to get user by ID: %v", err)
         return nil, errors.NotFound("User", err)
     }
-
+    
     return &AuthResult{
-        User:  user,
-        Token: token,
+        User:         user,
+        Token:        token,
+        RefreshToken: newRefreshToken,
     }, nil
-}
-
-func (uc *AuthUseCase) GetUserByID(ctx context.Context, id string) (*entity.User, error) {
-	user, err := uc.userRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, errors.NotFound("User", err)
-	}
-	return user, nil
-}
-
-func (uc *AuthUseCase) RefreshToken(ctx context.Context, refreshToken string) (string, error) {
-	uid, err := uc.firebaseAuth.VerifyToken(ctx, refreshToken)
-	if err != nil {
-		return "", errors.Unauthorized("Invalid refresh token", err)
-	}
-	
-	newToken, err := uc.firebaseAuth.GenerateToken(ctx, uid)
-	if err != nil {
-		return "", errors.Internal("Failed to generate new token", err)
-	}
-	
-	return newToken, nil
 }
 
 func (uc *AuthUseCase) Logout(ctx context.Context, token string) error {
