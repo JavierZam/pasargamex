@@ -18,4 +18,5 @@ func SetupDevRouter(e *echo.Echo, environment string) {
 	// Dev token endpoints
 	e.GET("/_dev/token/user", devTokenHandler.GenerateUserToken)
 	e.GET("/_dev/token/admin", devTokenHandler.GenerateAdminToken)
+	e.POST("/_dev/long-lived-token", devTokenHandler.GetLongLivedToken)
 }

@@ -15,6 +15,7 @@ func SetupAuthRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware) {
 	// Public routes
 	e.POST("/v1/auth/register", authHandler.Register)
 	e.POST("/v1/auth/login", authHandler.Login)
+	e.POST("/v1/auth/refresh", authHandler.RefreshToken)
 
 	// Protected routes
 	protected := e.Group("/v1/auth")

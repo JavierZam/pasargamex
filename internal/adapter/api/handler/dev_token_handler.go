@@ -174,3 +174,26 @@ func parseJWTWithoutVerification(tokenString string) map[string]interface{} {
 	
 	return claims
 }
+
+func (h *DevTokenHandler) GetLongLivedToken(c echo.Context) error {
+    // Parse request
+    var req struct {
+        Email    string `json:"email" validate:"required,email"`
+        UserID   string `json:"user_id" validate:"required"`
+    }
+    
+    if err := c.Bind(&req); err != nil {
+        return response.Error(c, err)
+    }
+    
+    // Generate token langsung dengan Firebase
+    token, refreshToken, err := h.firebaseAuth.GenerateDevTokenPair(c.Request().Context(), req.Email)
+    if err != nil {
+        return response.Error(c, err)
+    }
+    
+    return response.Success(c, map[string]interface{}{
+        "token": token,
+        "refresh_token": refreshToken,
+    })
+}
