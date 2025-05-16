@@ -30,10 +30,10 @@ func GetHealthHandler() *HealthHandler {
 }
 
 func (h *HealthHandler) CheckHealth(c echo.Context) error {
-    return c.JSON(http.StatusOK, map[string]string{
-        "status": "Server is running",
-        "time":   time.Now().Format(time.RFC3339),
-    })
+	return c.JSON(http.StatusOK, map[string]string{
+		"status": "Server is running",
+		"time":   time.Now().Format(time.RFC3339),
+	})
 }
 
 func (h *HealthHandler) CheckFirebaseHealth(c echo.Context) error {
@@ -44,7 +44,7 @@ func (h *HealthHandler) CheckFirebaseHealth(c echo.Context) error {
 			"error":  err.Error(),
 		})
 	}
-	
+
 	return c.JSON(http.StatusOK, map[string]string{
 		"status": "Firebase Auth connected successfully",
 	})

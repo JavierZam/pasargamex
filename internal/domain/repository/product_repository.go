@@ -16,5 +16,4 @@ type ProductRepository interface {
 	IncrementViews(ctx context.Context, id string) error
 	ListBySellerID(ctx context.Context, sellerID string, status string, limit, offset int) ([]*entity.Product, int64, error)
 	Search(ctx context.Context, query string, filter map[string]interface{}, limit, offset int) ([]*entity.Product, int64, error)
-
 }

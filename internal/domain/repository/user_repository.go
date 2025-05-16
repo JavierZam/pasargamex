@@ -13,5 +13,5 @@ type UserRepository interface {
 	Update(ctx context.Context, user *entity.User) error
 	Delete(ctx context.Context, id string) error
 	FindByField(ctx context.Context, field, value string, limit, offset int) ([]*entity.User, int64, error)
-    GetUserByRole(ctx context.Context, role string, limit int) ([]*entity.User)
+	GetUserByRole(ctx context.Context, role string, limit int) []*entity.User
 }

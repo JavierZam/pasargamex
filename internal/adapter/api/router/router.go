@@ -8,11 +8,11 @@ import (
 )
 
 func Setup(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddleware *middleware.AdminMiddleware, authClient *auth.Client) {
-    SetupAuthRouter(e, authMiddleware)
-    SetupUserRouter(e, authMiddleware, adminMiddleware)
-    SetupGameTitleRouter(e, authMiddleware, adminMiddleware)
-    SetupProductRouter(e, authMiddleware, adminMiddleware, authClient)
-    SetupTransactionRouter(e, authMiddleware, adminMiddleware)
-    SetupHealthRouter(e)
-    SetupReviewRouter(e, authMiddleware, adminMiddleware)
+	SetupAuthRouter(e, authMiddleware)
+	SetupUserRouter(e, authMiddleware, adminMiddleware)
+	SetupGameTitleRouter(e, authMiddleware, adminMiddleware)
+	SetupProductRouter(e, authMiddleware, adminMiddleware, authClient)
+	SetupTransactionRouter(e, authMiddleware, adminMiddleware)
+	SetupHealthRouter(e)
+	SetupReviewRouter(e, authMiddleware, adminMiddleware)
 }

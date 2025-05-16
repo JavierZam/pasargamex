@@ -7,16 +7,13 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// SetupTransactionRouter initializes transaction routes
 func SetupTransactionRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddleware *middleware.AdminMiddleware) {
-	// Get handlers from DI
+
 	transactionHandler := handler.GetTransactionHandler()
 
-	// All transaction routes require authentication
 	transactions := e.Group("/v1/transactions")
 	transactions.Use(authMiddleware.Authenticate)
 
-	// User endpoints
 	transactions.POST("", transactionHandler.CreateTransaction)
 	transactions.GET("", transactionHandler.ListTransactions)
 	transactions.GET("/:id", transactionHandler.GetTransaction)
@@ -26,7 +23,6 @@ func SetupTransactionRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddlew
 	transactions.POST("/:id/cancel", transactionHandler.CancelTransaction)
 	transactions.GET("/:id/logs", transactionHandler.GetTransactionLogs)
 
-	// Admin endpoints
 	admin := e.Group("/v1/admin/transactions")
 	admin.Use(authMiddleware.Authenticate)
 	admin.Use(adminMiddleware.AdminOnly)

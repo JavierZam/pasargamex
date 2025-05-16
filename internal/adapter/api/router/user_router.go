@@ -7,12 +7,10 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// SetupUserRouter initializes user routes
 func SetupUserRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddleware *middleware.AdminMiddleware) {
-	// Get handlers from DI
+
 	userHandler := handler.GetUserHandler()
 
-	// All user routes are protected
 	users := e.Group("/v1/users")
 	users.Use(authMiddleware.Authenticate)
 
@@ -22,11 +20,9 @@ func SetupUserRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, ad
 
 	users.POST("/me/verification", userHandler.SubmitVerification)
 
-	// Admin routes for verification
 	admin := e.Group("/v1/admin/users")
-    admin.Use(authMiddleware.Authenticate) // Pertama, verifikasi token
-    admin.Use(adminMiddleware.AdminOnly)   // Kedua, verifikasi role admin
-	
-	// Add admin verification processing endpoint
+	admin.Use(authMiddleware.Authenticate)
+	admin.Use(adminMiddleware.AdminOnly)
+
 	admin.POST("/:userId/verification", userHandler.ProcessVerification)
 }

@@ -21,7 +21,6 @@ func (e *AppError) Unwrap() error {
 	return e.Err
 }
 
-// New creates a new application error
 func New(code string, message string, status int, err error) *AppError {
 	return &AppError{
 		Code:    code,
@@ -31,7 +30,6 @@ func New(code string, message string, status int, err error) *AppError {
 	}
 }
 
-// NotFound creates a new not found error
 func NotFound(resource string, err error) *AppError {
 	return &AppError{
 		Code:    "NOT_FOUND",
@@ -41,7 +39,6 @@ func NotFound(resource string, err error) *AppError {
 	}
 }
 
-// BadRequest creates a new bad request error
 func BadRequest(message string, err error) *AppError {
 	return &AppError{
 		Code:    "BAD_REQUEST",
@@ -51,7 +48,6 @@ func BadRequest(message string, err error) *AppError {
 	}
 }
 
-// Unauthorized creates a new unauthorized error
 func Unauthorized(message string, err error) *AppError {
 	return &AppError{
 		Code:    "UNAUTHORIZED",
@@ -61,7 +57,6 @@ func Unauthorized(message string, err error) *AppError {
 	}
 }
 
-// Internal creates a new internal server error
 func Internal(message string, err error) *AppError {
 	return &AppError{
 		Code:    "INTERNAL_ERROR",
@@ -71,7 +66,6 @@ func Internal(message string, err error) *AppError {
 	}
 }
 
-// Is check if the error is of type AppError and matches the given code
 func Is(err error, code string) bool {
 	var appErr *AppError
 	if errors.As(err, &appErr) {
@@ -80,12 +74,11 @@ func Is(err error, code string) bool {
 	return false
 }
 
-// Forbidden 
 func Forbidden(message string, err error) *AppError {
-    return &AppError{
-        Code:    "FORBIDDEN",
-        Message: message,
-        Status:  http.StatusForbidden, // 403
-        Err:     err,
-    }
+	return &AppError{
+		Code:    "FORBIDDEN",
+		Message: message,
+		Status:  http.StatusForbidden,
+		Err:     err,
+	}
 }

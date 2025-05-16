@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"log"
-	"net/http" // Add this import
+	"net/http"
 	"os"
-	"strings" // Add this import
+	"strings"
 
 	"cloud.google.com/go/firestore"
 	"github.com/labstack/echo/v4"
@@ -25,13 +25,12 @@ import (
 )
 
 func main() {
-	// Load configuration
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Initialize context
 	ctx := context.Background()
 
 	serviceAccountPath := os.Getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
@@ -39,7 +38,6 @@ func main() {
 		serviceAccountPath = "./pasargamex-458303-firebase-adminsdk-fbsvc-f079266cd9.json"
 	}
 
-	// Setup Firebase App
 	var firebaseApp *fbapp.App
 	opt := option.WithCredentialsFile(serviceAccountPath)
 	firebaseApp, err = fbapp.NewApp(ctx, &fbapp.Config{ProjectID: cfg.FirebaseProject}, opt)
@@ -47,30 +45,25 @@ func main() {
 		log.Fatalf("Failed to initialize Firebase: %v", err)
 	}
 
-	// Initialize Firestore with the same credentials
 	firestoreClient, err := firestore.NewClient(ctx, cfg.FirebaseProject, opt)
 	if err != nil {
 		log.Fatalf("Failed to create Firestore client: %v", err)
 	}
 	defer firestoreClient.Close()
 
-	// Initialize Firebase Auth
 	authClient, err := firebaseApp.Auth(ctx)
 	if err != nil {
 		log.Fatalf("Failed to initialize Firebase Auth: %v", err)
 	}
 
-	// Initialize repositories
 	userRepo := repository.NewFirestoreUserRepository(firestoreClient)
 	gameTitleRepo := repository.NewFirestoreGameTitleRepository(firestoreClient)
 	productRepo := repository.NewFirestoreProductRepository(firestoreClient)
 	reviewRepo := repository.NewFirestoreReviewRepository(firestoreClient)
 	transactionRepo := repository.NewFirestoreTransactionRepository(firestoreClient)
 
-	// Initialize Firebase auth client adapter
 	firebaseAuthClient := firebase.NewFirebaseAuthClient(authClient, cfg.FirebaseApiKey)
 
-	// Initialize use cases
 	authUseCase := usecase.NewAuthUseCase(userRepo, firebaseAuthClient)
 	userUseCase := usecase.NewUserUseCase(userRepo, firebaseAuthClient)
 	gameTitleUseCase := usecase.NewGameTitleUseCase(gameTitleRepo)
@@ -78,32 +71,26 @@ func main() {
 	reviewUseCase := usecase.NewReviewUseCase(reviewRepo, userRepo)
 	transactionUseCase := usecase.NewTransactionUseCase(transactionRepo, productRepo, userRepo)
 
-	// Setup handlers
 	handler.Setup(authUseCase, userUseCase, gameTitleUseCase, productUseCase, reviewUseCase, transactionUseCase)
 	handler.SetupDevTokenHandler(firebaseAuthClient, userRepo)
 
-	// Initialize Echo
 	e := echo.New()
-	
-	// Middleware
+
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
-	
-	// Initialize validator
+
 	e.Validator = api.NewValidator()
 
-	// Auth middleware
 	authMiddleware := apimiddleware.NewAuthMiddleware(authClient)
 	adminMiddleware := apimiddleware.NewAdminMiddleware(userRepo)
-	
-	// Add health check endpoint
+
 	e.GET("/health", func(c echo.Context) error {
 		return c.JSON(200, map[string]string{"status": "ok"})
 	})
-	
+
 	e.GET("/v1/debug/me", func(c echo.Context) error {
-		// Get the Authorization header
+
 		authHeader := c.Request().Header.Get("Authorization")
 		if authHeader == "" {
 			return c.JSON(http.StatusUnauthorized, map[string]interface{}{
@@ -111,7 +98,6 @@ func main() {
 			})
 		}
 
-		// Check if the Authorization header has the right format
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			return c.JSON(http.StatusUnauthorized, map[string]interface{}{
@@ -119,30 +105,25 @@ func main() {
 			})
 		}
 
-		// Extract the token
 		idToken := parts[1]
 
-		// Verify the token
 		token, err := authClient.VerifyIDToken(context.Background(), idToken)
 		if err != nil {
 			return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-				"error": "Invalid token",
+				"error":   "Invalid token",
 				"details": err.Error(),
 			})
 		}
 
-		// Return the user ID from the token
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"uid": token.UID,
+			"uid":            token.UID,
 			"token_verified": true,
 		})
 	}, authMiddleware.Authenticate)
-	
-	// Setup routers
+
 	router.Setup(e, authMiddleware, adminMiddleware, authClient)
 	router.SetupDevRouter(e, cfg.Environment)
-	
-	// Start server
+
 	log.Printf("Starting server on port %s...", cfg.ServerPort)
 	e.Logger.Fatal(e.Start(":" + cfg.ServerPort))
 }

@@ -20,19 +20,17 @@ func NewAdminMiddleware(userRepo repository.UserRepository) *AdminMiddleware {
 
 func (m *AdminMiddleware) AdminOnly(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		// Dapatkan user ID dari context (diset oleh auth middleware)
+
 		uid, ok := c.Get("uid").(string)
 		if !ok {
 			return echo.NewHTTPError(http.StatusUnauthorized, "Authentication required")
 		}
 
-		// Ambil user dari repository
 		user, err := m.userRepo.GetByID(c.Request().Context(), uid)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to verify admin privileges")
 		}
 
-		// Cek role
 		if user.Role != "admin" {
 			return echo.NewHTTPError(http.StatusForbidden, "Admin privileges required")
 		}

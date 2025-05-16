@@ -27,17 +27,15 @@ func NewFirestoreTransactionRepository(client *firestore.Client) repository.Tran
 }
 
 func (r *firestoreTransactionRepository) Create(ctx context.Context, transaction *entity.Transaction) error {
-	// Generate ID if not provided
+
 	if transaction.ID == "" {
 		transaction.ID = uuid.New().String()
 	}
 
-	// Set timestamps
 	now := time.Now()
 	transaction.CreatedAt = now
 	transaction.UpdatedAt = now
 
-	// Save to Firestore
 	_, err := r.client.Collection("transactions").Doc(transaction.ID).Set(ctx, transaction)
 	if err != nil {
 		return errors.Internal("Failed to create transaction", err)
@@ -78,12 +76,10 @@ func (r *firestoreTransactionRepository) List(ctx context.Context, filter map[st
 	collection := r.client.Collection("transactions")
 	query := collection.OrderBy("createdAt", firestore.Desc)
 
-	// Apply filters
 	for key, value := range filter {
 		query = query.Where(key, "==", value)
 	}
 
-	// Get total count
 	countQuery := query
 	countDocs, err := countQuery.Documents(ctx).GetAll()
 	if err != nil {
@@ -91,7 +87,6 @@ func (r *firestoreTransactionRepository) List(ctx context.Context, filter map[st
 	}
 	total := int64(len(countDocs))
 
-	// Apply pagination
 	if limit > 0 {
 		query = query.Limit(limit)
 	}
@@ -99,7 +94,6 @@ func (r *firestoreTransactionRepository) List(ctx context.Context, filter map[st
 		query = query.Offset(offset)
 	}
 
-	// Execute query
 	iter := query.Documents(ctx)
 	var transactions []*entity.Transaction
 
@@ -123,15 +117,13 @@ func (r *firestoreTransactionRepository) List(ctx context.Context, filter map[st
 }
 
 func (r *firestoreTransactionRepository) CreateLog(ctx context.Context, log *entity.TransactionLog) error {
-	// Generate ID if not provided
+
 	if log.ID == "" {
 		log.ID = uuid.New().String()
 	}
 
-	// Set timestamp
 	log.CreatedAt = time.Now()
 
-	// Save to Firestore
 	_, err := r.client.Collection("transaction_logs").Doc(log.ID).Set(ctx, log)
 	if err != nil {
 		return errors.Internal("Failed to create transaction log", err)
@@ -168,7 +160,7 @@ func (r *firestoreTransactionRepository) ListLogsByTransactionID(ctx context.Con
 }
 
 func (r *firestoreTransactionRepository) ListByUserID(ctx context.Context, userID string, role string, status string, limit, offset int) ([]*entity.Transaction, int64, error) {
-	// Determine the field to query based on role
+
 	var field string
 	if role == "buyer" {
 		field = "buyerId"
@@ -180,22 +172,18 @@ func (r *firestoreTransactionRepository) ListByUserID(ctx context.Context, userI
 
 	query := r.client.Collection("transactions").Where(field, "==", userID)
 
-	// Add status filter if provided
 	if status != "" {
 		query = query.Where("status", "==", status)
 	}
 
-	// Order by created date, most recent first
 	query = query.OrderBy("createdAt", firestore.Desc)
 
-	// Get total count
 	countDocs, err := query.Documents(ctx).GetAll()
 	if err != nil {
 		return nil, 0, errors.Internal("Failed to count transactions", err)
 	}
 	total := int64(len(countDocs))
 
-	// Apply pagination
 	if limit > 0 {
 		query = query.Limit(limit)
 	}
@@ -203,7 +191,6 @@ func (r *firestoreTransactionRepository) ListByUserID(ctx context.Context, userI
 		query = query.Offset(offset)
 	}
 
-	// Execute query
 	iter := query.Documents(ctx)
 	var transactions []*entity.Transaction
 
@@ -233,14 +220,12 @@ func (r *firestoreTransactionRepository) ListPendingMiddlemanTransactions(ctx co
 		Where("middlemanStatus", "==", "pending_assignment").
 		OrderBy("createdAt", firestore.Asc)
 
-	// Get total count
 	countDocs, err := query.Documents(ctx).GetAll()
 	if err != nil {
 		return nil, 0, errors.Internal("Failed to count pending middleman transactions", err)
 	}
 	total := int64(len(countDocs))
 
-	// Apply pagination
 	if limit > 0 {
 		query = query.Limit(limit)
 	}
@@ -248,7 +233,6 @@ func (r *firestoreTransactionRepository) ListPendingMiddlemanTransactions(ctx co
 		query = query.Offset(offset)
 	}
 
-	// Execute query
 	iter := query.Documents(ctx)
 	var transactions []*entity.Transaction
 
@@ -272,41 +256,40 @@ func (r *firestoreTransactionRepository) ListPendingMiddlemanTransactions(ctx co
 }
 
 func (r *firestoreTransactionRepository) GetTransactionStats(ctx context.Context, userID string, period string) (map[string]interface{}, error) {
-	// Implementation depends on requirements
-	// This is just a placeholder
+
 	log.Printf("GetTransactionStats called for user %s with period %s", userID, period)
-	
+
 	return map[string]interface{}{
-		"totalTransactions": 0,
-		"totalSales": 0.0,
-		"totalPurchases": 0.0,
+		"totalTransactions":     0,
+		"totalSales":            0.0,
+		"totalPurchases":        0.0,
 		"completedTransactions": 0,
-		"pendingTransactions": 0,
+		"pendingTransactions":   0,
 	}, nil
 }
 
 func (r *firestoreTransactionRepository) HasCompletedTransaction(ctx context.Context, userID, productID string) (bool, error) {
-    log.Printf("Checking if user %s has completed transaction for product %s", userID, productID)
-    
-    query := r.client.Collection("transactions").
-        Where("buyerId", "==", userID).
-        Where("productId", "==", productID).
-        Where("status", "==", "completed").
-        Where("paymentStatus", "==", "paid").
-        Limit(1)
+	log.Printf("Checking if user %s has completed transaction for product %s", userID, productID)
 
-    iter := query.Documents(ctx)
-    doc, err := iter.Next()
-    
-    if err != nil {
-        if err == iterator.Done {
-            log.Printf("No completed transaction found")
-            return false, nil
-        }
-        log.Printf("Error checking completed transaction: %v", err)
-        return false, err
-    }
+	query := r.client.Collection("transactions").
+		Where("buyerId", "==", userID).
+		Where("productId", "==", productID).
+		Where("status", "==", "completed").
+		Where("paymentStatus", "==", "paid").
+		Limit(1)
 
-    log.Printf("Completed transaction found: %v", doc.Ref.ID)
-    return true, nil
+	iter := query.Documents(ctx)
+	doc, err := iter.Next()
+
+	if err != nil {
+		if err == iterator.Done {
+			log.Printf("No completed transaction found")
+			return false, nil
+		}
+		log.Printf("Error checking completed transaction: %v", err)
+		return false, err
+	}
+
+	log.Printf("Completed transaction found: %v", doc.Ref.ID)
+	return true, nil
 }

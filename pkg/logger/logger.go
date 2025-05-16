@@ -11,7 +11,7 @@ var (
 	InfoLogger  *log.Logger
 	ErrorLogger *log.Logger
 	DebugLogger *log.Logger
-	WarnLogger  *log.Logger // Add warning level
+	WarnLogger  *log.Logger
 )
 
 func init() {
@@ -39,7 +39,6 @@ func Warn(format string, v ...interface{}) {
 	WarnLogger.Printf(format, v...)
 }
 
-// Add a context helper for more structured logs
 func WithContext(ctx interface{}, format string, v ...interface{}) string {
 	_, file, line, _ := runtime.Caller(1)
 	contextStr := fmt.Sprintf("%v:%d", file, line)
@@ -49,7 +48,6 @@ func WithContext(ctx interface{}, format string, v ...interface{}) string {
 	return fmt.Sprintf("[%s] %s", contextStr, fmt.Sprintf(format, v...))
 }
 
-// Helper for transaction logs
 func LogTransactionError(transactionID, action string, err error) {
 	Warn("Transaction log error: action=%s, transactionID=%s, error=%v", action, transactionID, err)
 }

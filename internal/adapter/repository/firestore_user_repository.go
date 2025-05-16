@@ -58,52 +58,47 @@ func (r *firestoreUserRepository) GetByEmail(ctx context.Context, email string) 
 }
 
 func (r *firestoreUserRepository) Update(ctx context.Context, user *entity.User) error {
-    log.Printf("Updating user in Firestore, ID: %s", user.ID)
-    
-    // Konversi struct User ke map untuk digunakan dengan MergeAll
-    updateData := map[string]interface{}{
-        "username":  user.Username,
-        "phone":     user.Phone,
-        "bio":       user.Bio,
-        "updatedAt": time.Now(),
-        
-        // Add verification fields
-        "fullName":           user.FullName,
-        "address":            user.Address,
-        "dateOfBirth":        user.DateOfBirth,
-        "idNumber":           user.IdNumber,
-        "idCardImage":        user.IdCardImage,
-        "verificationStatus": user.VerificationStatus,
-    }
-    
-    // Only include non-empty fields
-    // This prevents overwriting existing data with empty values
-    cleanUpdateData := make(map[string]interface{})
-    for key, value := range updateData {
-        // Skip empty strings
-        if strVal, ok := value.(string); ok && strVal == "" {
-            continue
-        }
-        
-        // Skip zero time
-        if timeVal, ok := value.(time.Time); ok && timeVal.IsZero() {
-            continue
-        }
-        
-        cleanUpdateData[key] = value
-    }
-    
-    log.Printf("Update data: %+v", cleanUpdateData)
-    
-    _, err := r.client.Collection("users").Doc(user.ID).Set(ctx, cleanUpdateData, firestore.MergeAll)
-    
-    if err != nil {
-        log.Printf("Firestore update error: %v", err)
-        return err
-    }
-    
-    log.Printf("User updated successfully in Firestore")
-    return nil
+	log.Printf("Updating user in Firestore, ID: %s", user.ID)
+
+	updateData := map[string]interface{}{
+		"username":  user.Username,
+		"phone":     user.Phone,
+		"bio":       user.Bio,
+		"updatedAt": time.Now(),
+
+		"fullName":           user.FullName,
+		"address":            user.Address,
+		"dateOfBirth":        user.DateOfBirth,
+		"idNumber":           user.IdNumber,
+		"idCardImage":        user.IdCardImage,
+		"verificationStatus": user.VerificationStatus,
+	}
+
+	cleanUpdateData := make(map[string]interface{})
+	for key, value := range updateData {
+
+		if strVal, ok := value.(string); ok && strVal == "" {
+			continue
+		}
+
+		if timeVal, ok := value.(time.Time); ok && timeVal.IsZero() {
+			continue
+		}
+
+		cleanUpdateData[key] = value
+	}
+
+	log.Printf("Update data: %+v", cleanUpdateData)
+
+	_, err := r.client.Collection("users").Doc(user.ID).Set(ctx, cleanUpdateData, firestore.MergeAll)
+
+	if err != nil {
+		log.Printf("Firestore update error: %v", err)
+		return err
+	}
+
+	log.Printf("User updated successfully in Firestore")
+	return nil
 }
 
 func (r *firestoreUserRepository) Delete(ctx context.Context, id string) error {
@@ -113,26 +108,23 @@ func (r *firestoreUserRepository) Delete(ctx context.Context, id string) error {
 
 func (r *firestoreUserRepository) FindByField(ctx context.Context, field, value string, limit, offset int) ([]*entity.User, int64, error) {
 	query := r.client.Collection("users").Where(field, "==", value)
-	
-	// Get total count
+
 	countDocs, err := query.Documents(ctx).GetAll()
 	if err != nil {
 		return nil, 0, err
 	}
 	total := int64(len(countDocs))
-	
-	// Apply pagination
+
 	if limit > 0 {
 		query = query.Limit(limit)
 	}
 	if offset > 0 {
 		query = query.Offset(offset)
 	}
-	
-	// Execute query
+
 	iter := query.Documents(ctx)
 	var users []*entity.User
-	
+
 	for {
 		doc, err := iter.Next()
 		if err == iterator.Done {
@@ -141,23 +133,23 @@ func (r *firestoreUserRepository) FindByField(ctx context.Context, field, value 
 		if err != nil {
 			return nil, 0, err
 		}
-		
+
 		var user entity.User
 		if err := doc.DataTo(&user); err != nil {
 			return nil, 0, err
 		}
 		users = append(users, &user)
 	}
-	
+
 	return users, total, nil
 }
 
-func (r *firestoreUserRepository) GetUserByRole(ctx context.Context, role string, limit int) ([]*entity.User) {
+func (r *firestoreUserRepository) GetUserByRole(ctx context.Context, role string, limit int) []*entity.User {
 	query := r.client.Collection("users").Where("role", "==", role).Limit(limit)
-	
+
 	iter := query.Documents(ctx)
 	var users []*entity.User
-	
+
 	for {
 		doc, err := iter.Next()
 		if err == iterator.Done {
@@ -167,16 +159,15 @@ func (r *firestoreUserRepository) GetUserByRole(ctx context.Context, role string
 			log.Printf("Error getting user by role: %v", err)
 			return []*entity.User{}
 		}
-		
+
 		var user entity.User
 		if err := doc.DataTo(&user); err != nil {
 			log.Printf("Error parsing user data: %v", err)
 			continue
 		}
-		
+
 		users = append(users, &user)
 	}
-	
+
 	return users
 }
-

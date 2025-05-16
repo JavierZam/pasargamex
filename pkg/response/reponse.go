@@ -29,12 +29,11 @@ type PaginatedResponse struct {
 }
 
 type CustomError struct {
-    Code    string
-    Message string
-    Status  int
+	Code    string
+	Message string
+	Status  int
 }
 
-// Success returns a success response with data
 func Success(c echo.Context, data interface{}) error {
 	return c.JSON(http.StatusOK, Response{
 		Success: true,
@@ -42,7 +41,6 @@ func Success(c echo.Context, data interface{}) error {
 	})
 }
 
-// Created returns a success response for resource creation
 func Created(c echo.Context, data interface{}) error {
 	return c.JSON(http.StatusCreated, Response{
 		Success: true,
@@ -50,7 +48,6 @@ func Created(c echo.Context, data interface{}) error {
 	})
 }
 
-// Paginated returns a paginated response
 func Paginated(c echo.Context, items interface{}, total int64, page, pageSize int) error {
 	totalPages := int(total) / pageSize
 	if int(total)%pageSize > 0 {
@@ -69,7 +66,6 @@ func Paginated(c echo.Context, items interface{}, total int64, page, pageSize in
 	})
 }
 
-// Error returns an error response
 func Error(c echo.Context, err error) error {
 	var appErr *apperrors.AppError
 	if errors.As(err, &appErr) {
@@ -82,7 +78,6 @@ func Error(c echo.Context, err error) error {
 		})
 	}
 
-	// Default to internal server error
 	return c.JSON(http.StatusInternalServerError, Response{
 		Success: false,
 		Error: &ErrorInfo{
@@ -93,13 +88,13 @@ func Error(c echo.Context, err error) error {
 }
 
 func (e *CustomError) Error() string {
-    return e.Message
+	return e.Message
 }
 
 func NewError(code, message string, status int) error {
-    return &CustomError{
-        Code:    code,
-        Message: message,
-        Status:  status,
-    }
+	return &CustomError{
+		Code:    code,
+		Message: message,
+		Status:  status,
+	}
 }

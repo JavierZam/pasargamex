@@ -26,20 +26,18 @@ func NewFirestoreGameTitleRepository(client *firestore.Client) repository.GameTi
 }
 
 func (r *firestoreGameTitleRepository) Create(ctx context.Context, gameTitle *entity.GameTitle) error {
-	// Generate ID if not provided
+
 	if gameTitle.ID == "" {
 		doc := r.client.Collection("game_titles").NewDoc()
 		gameTitle.ID = doc.ID
 	}
 
-	// Set timestamps
 	now := time.Now()
 	if gameTitle.CreatedAt.IsZero() {
 		gameTitle.CreatedAt = now
 	}
 	gameTitle.UpdatedAt = now
 
-	// Save to Firestore
 	_, err := r.client.Collection("game_titles").Doc(gameTitle.ID).Set(ctx, gameTitle)
 	if err != nil {
 		return errors.Internal("Failed to create game title", err)
@@ -69,7 +67,7 @@ func (r *firestoreGameTitleRepository) GetBySlug(ctx context.Context, slug strin
 	query := r.client.Collection("game_titles").Where("slug", "==", slug).Limit(1)
 	iter := query.Documents(ctx)
 	doc, err := iter.Next()
-	
+
 	if err != nil {
 		if err == iterator.Done {
 			return nil, errors.NotFound("Game Title", nil)
@@ -86,67 +84,61 @@ func (r *firestoreGameTitleRepository) GetBySlug(ctx context.Context, slug strin
 }
 
 func (r *firestoreGameTitleRepository) List(ctx context.Context, filter map[string]interface{}, limit, offset int) ([]*entity.GameTitle, int64, error) {
-    // Tambahkan logging untuk debug
-    log.Printf("Listing game titles with filter: %v, limit: %d, offset: %d", filter, limit, offset)
-    
-    collection := r.client.Collection("game_titles")
-    query := collection.OrderBy("name", firestore.Asc)
 
-    // Apply filters
-    for key, value := range filter {
-        log.Printf("Applying filter: %s = %v", key, value)
-        query = query.Where(key, "==", value)
-    }
+	log.Printf("Listing game titles with filter: %v, limit: %d, offset: %d", filter, limit, offset)
 
-    // Get total count (dengan filter yang sama)
-    countQuery := collection.OrderBy("name", firestore.Asc)
-    for key, value := range filter {
-        countQuery = countQuery.Where(key, "==", value)
-    }
+	collection := r.client.Collection("game_titles")
+	query := collection.OrderBy("name", firestore.Asc)
 
-    // Get total count docs
-    countDocs, err := countQuery.Documents(ctx).GetAll()
-    if err != nil {
-        log.Printf("Error counting game titles: %v", err)
-        return nil, 0, errors.Internal("Failed to count game titles", err)
-    }
-    total := int64(len(countDocs))
-    log.Printf("Found %d game titles matching filter", total)
+	for key, value := range filter {
+		log.Printf("Applying filter: %s = %v", key, value)
+		query = query.Where(key, "==", value)
+	}
 
-    // Apply pagination
-    if limit > 0 {
-        query = query.Limit(limit)
-    }
-    if offset > 0 {
-        query = query.Offset(offset)
-    }
+	countQuery := collection.OrderBy("name", firestore.Asc)
+	for key, value := range filter {
+		countQuery = countQuery.Where(key, "==", value)
+	}
 
-    // Execute query
-    iter := query.Documents(ctx)
-    var gameTitles []*entity.GameTitle
+	countDocs, err := countQuery.Documents(ctx).GetAll()
+	if err != nil {
+		log.Printf("Error counting game titles: %v", err)
+		return nil, 0, errors.Internal("Failed to count game titles", err)
+	}
+	total := int64(len(countDocs))
+	log.Printf("Found %d game titles matching filter", total)
 
-    for {
-        doc, err := iter.Next()
-        if err == iterator.Done {
-            break
-        }
-        if err != nil {
-            log.Printf("Error iterating game titles: %v", err)
-            return nil, 0, errors.Internal("Failed to iterate game titles", err)
-        }
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
 
-        var gameTitle entity.GameTitle
-        if err := doc.DataTo(&gameTitle); err != nil {
-            log.Printf("Error parsing game title data: %v", err)
-            return nil, 0, errors.Internal("Failed to parse game title data", err)
-        }
-        
-        // Make sure ID is set
-        gameTitle.ID = doc.Ref.ID
-        gameTitles = append(gameTitles, &gameTitle)
-    }
+	iter := query.Documents(ctx)
+	var gameTitles []*entity.GameTitle
 
-    return gameTitles, total, nil
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			log.Printf("Error iterating game titles: %v", err)
+			return nil, 0, errors.Internal("Failed to iterate game titles", err)
+		}
+
+		var gameTitle entity.GameTitle
+		if err := doc.DataTo(&gameTitle); err != nil {
+			log.Printf("Error parsing game title data: %v", err)
+			return nil, 0, errors.Internal("Failed to parse game title data", err)
+		}
+
+		gameTitle.ID = doc.Ref.ID
+		gameTitles = append(gameTitles, &gameTitle)
+	}
+
+	return gameTitles, total, nil
 }
 
 func (r *firestoreGameTitleRepository) Update(ctx context.Context, gameTitle *entity.GameTitle) error {
