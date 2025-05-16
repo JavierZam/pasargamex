@@ -14,6 +14,7 @@ type Config struct {
 	JWTExpiry          string
 	FirebaseApiKey     string
 	FirebaseAuthDomain string
+	StorageBucket      string
 }
 
 func Load() (*Config, error) {
@@ -27,6 +28,7 @@ func Load() (*Config, error) {
 		JWTExpiry:          getEnv("JWT_EXPIRY", "86400"),
 		FirebaseApiKey:     getEnv("FIREBASE_API_KEY", ""),
 		FirebaseAuthDomain: getEnv("FIREBASE_AUTH_DOMAIN", ""),
+		StorageBucket:      getEnv("STORAGE_BUCKET", ""),
 	}
 
 	return config, nil
