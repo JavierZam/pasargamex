@@ -37,7 +37,6 @@ func GetDevTokenHandler() *DevTokenHandler {
 	return devTokenHandler
 }
 
-// GenerateUserToken generates tokens for a regular user for development
 func (h *DevTokenHandler) GenerateUserToken(c echo.Context) error {
 	// Hanya berfungsi di mode development
 	if c.Get("environment") != "development" {
@@ -195,5 +194,30 @@ func (h *DevTokenHandler) GetLongLivedToken(c echo.Context) error {
     return response.Success(c, map[string]interface{}{
         "token": token,
         "refresh_token": refreshToken,
+    })
+}
+
+func (h *DevTokenHandler) TestRefreshToken(c echo.Context) error {
+    // Parse request
+    var req struct {
+        RefreshToken string `json:"refresh_token" validate:"required"`
+    }
+    
+    if err := c.Bind(&req); err != nil {
+        return response.Error(c, err)
+    }
+    
+    // Try refreshing the token
+    token, refreshToken, err := h.firebaseAuth.RefreshIdToken(req.RefreshToken)
+    if err != nil {
+        log.Printf("Refresh token error: %v", err)
+        return response.Error(c, err)
+    }
+    
+    // Return success
+    return response.Success(c, map[string]interface{}{
+        "token":         token,
+        "refresh_token": refreshToken,
+        "message":       "Token refreshed successfully",
     })
 }

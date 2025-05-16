@@ -21,6 +21,5 @@ func SetupAuthRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware) {
 	protected := e.Group("/v1/auth")
 	protected.Use(authMiddleware.Authenticate)
 
-	protected.POST("/refresh", authHandler.RefreshToken)
 	protected.POST("/logout", authHandler.Logout)
 }

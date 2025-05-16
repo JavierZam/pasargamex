@@ -259,25 +259,26 @@ func (f *FirebaseAuthClient) SignInWithEmailPasswordWithRefresh(email, password 
     return result.IDToken, result.RefreshToken, nil
 }
 
-// Tambahkan metode untuk refresh token
 func (f *FirebaseAuthClient) RefreshIdToken(refreshToken string) (string, string, error) {
     if f.apiKey == "" {
         return "", "", fmt.Errorf("Firebase API key is not set")
     }
 
-    url := fmt.Sprintf("https://securetoken.googleapis.com/v1/token?key=%s", f.apiKey)
+    apiURL := fmt.Sprintf("https://securetoken.googleapis.com/v1/token?key=%s", f.apiKey)
     
-    // Prepare request body
-    reqBody := fmt.Sprintf(`{"grant_type":"refresh_token","refresh_token":"%s"}`, refreshToken)
+    // Prepare the POST data
+    data := fmt.Sprintf("grant_type=refresh_token&refresh_token=%s", refreshToken)
     
-    // Send request
-    req, err := http.NewRequest("POST", url, strings.NewReader(reqBody))
+    // Create the request
+    req, err := http.NewRequest("POST", apiURL, strings.NewReader(data))
     if err != nil {
         return "", "", err
     }
     
+    // Set the required headers
     req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
     
+    // Send the request
     client := &http.Client{Timeout: 10 * time.Second}
     resp, err := client.Do(req)
     if err != nil {
@@ -285,23 +286,27 @@ func (f *FirebaseAuthClient) RefreshIdToken(refreshToken string) (string, string
     }
     defer resp.Body.Close()
     
-    body, err := ioutil.ReadAll(resp.Body)
+    // Debug: Log the entire response
+    respBody, err := ioutil.ReadAll(resp.Body)
     if err != nil {
         return "", "", err
     }
     
+    log.Printf("Refresh token response: Status=%d, Body=%s", resp.StatusCode, string(respBody))
+    
     if resp.StatusCode != http.StatusOK {
-        return "", "", fmt.Errorf("firebase refresh token API error: %s", string(body))
+        return "", "", fmt.Errorf("firebase refresh token API error: %s", string(respBody))
     }
     
-    // Parse response
+    // Parse the JSON response
     var result struct {
         IDToken      string `json:"id_token"`
         RefreshToken string `json:"refresh_token"`
+        ExpiresIn    string `json:"expires_in"`
     }
     
-    if err := json.Unmarshal(body, &result); err != nil {
-        return "", "", err
+    if err := json.Unmarshal(respBody, &result); err != nil {
+        return "", "", fmt.Errorf("error parsing response: %v", err)
     }
     
     return result.IDToken, result.RefreshToken, nil
