@@ -15,5 +15,5 @@ func Setup(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddlew
 	SetupTransactionRouter(e, authMiddleware, adminMiddleware)
 	SetupHealthRouter(e)
 	SetupReviewRouter(e, authMiddleware, adminMiddleware)
-	SetupFileRouter(e, authMiddleware)
+	SetupFileRouter(e, authMiddleware, adminMiddleware)
 }

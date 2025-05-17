@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
-	"time"
 
 	"cloud.google.com/go/storage"
 	"github.com/google/uuid"
 	"google.golang.org/api/option"
+
+	"pasargamex/internal/domain/service"
+	"pasargamex/pkg/logger"
 )
 
 type CloudStorageClient struct {
@@ -37,7 +38,7 @@ func NewCloudStorageClient(ctx context.Context, bucketName, projectID string, cr
 	}
 
 	if err := storageClient.setBucketCORS(ctx); err != nil {
-		fmt.Printf("Warning: Failed to set CORS configuration: %v\n", err)
+		logger.Warn("Failed to set CORS configuration: %v", err)
 	}
 
 	return storageClient, nil
@@ -47,9 +48,9 @@ func (c *CloudStorageClient) setBucketCORS(ctx context.Context) error {
 	bucket := c.client.Bucket(c.bucketName)
 
 	corsConfig := storage.CORS{
-		MaxAge:          3600, // 1 hour
+		MaxAge:          3600,
 		Methods:         []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		Origins:         []string{"*"}, // Replace with your domains in production
+		Origins:         []string{"*"},
 		ResponseHeaders: []string{"Content-Type", "x-goog-resumable"},
 	}
 
@@ -72,8 +73,21 @@ func (c *CloudStorageClient) setBucketCORS(ctx context.Context) error {
 	return nil
 }
 
-func (c *CloudStorageClient) UploadFile(ctx context.Context, file io.Reader, fileType, folder string, isPublic bool) (string, error) {
-	// Add proper prefixes for public/private
+func sanitizeFilename(filename string) string {
+
+	filename = strings.ReplaceAll(filename, "/", "_")
+	filename = strings.ReplaceAll(filename, "\\", "_")
+
+	if len(filename) > 100 {
+		filename = filename[len(filename)-100:]
+	}
+
+	return filename
+}
+
+func (c *CloudStorageClient) UploadFile(ctx context.Context, file io.Reader, fileType, filename, folder string, isPublic bool) (*service.FileUploadResult, error) {
+	logger.Debug("Starting file upload to GCS: type=%s, folder=%s, public=%v", fileType, folder, isPublic)
+
 	if !strings.HasPrefix(folder, "public/") && !strings.HasPrefix(folder, "private/") {
 		if isPublic {
 			folder = "public/" + folder
@@ -82,100 +96,65 @@ func (c *CloudStorageClient) UploadFile(ctx context.Context, file io.Reader, fil
 		}
 	}
 
-	// Generate filename with UUID and timestamp
-	filename := fmt.Sprintf("%s/%s-%s", folder, uuid.New().String(), time.Now().Format("20060102150405"))
+	safeFilename := sanitizeFilename(filename)
 
-	// Add file extension
-	switch fileType {
-	case "image/jpeg", "image/jpg":
-		filename += ".jpg"
-	case "image/png":
-		filename += ".png"
-	case "image/gif":
-		filename += ".gif"
-	case "application/pdf":
-		filename += ".pdf"
-	default:
-		filename += ".bin"
-	}
+	objectName := fmt.Sprintf("%s/%s-%s", folder, uuid.New().String(), safeFilename)
 
-	// Create and upload object
-	obj := c.client.Bucket(c.bucketName).Object(filename)
+	logger.Debug("Generated object name: %s", objectName)
+
+	obj := c.client.Bucket(c.bucketName).Object(objectName)
 	wc := obj.NewWriter(ctx)
 	wc.ContentType = fileType
 	wc.CacheControl = "public, max-age=86400"
 
-	if _, err := io.Copy(wc, file); err != nil {
-		return "", fmt.Errorf("failed to copy file to GCS: %v", err)
+	written, err := io.Copy(wc, file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy file to GCS: %v", err)
 	}
 
 	if err := wc.Close(); err != nil {
-		return "", fmt.Errorf("failed to close writer: %v", err)
+		return nil, fmt.Errorf("failed to close writer: %v", err)
 	}
 
-	// With uniform bucket-level access, ACLs are controlled at bucket level
+	logger.Debug("File uploaded successfully to GCS: %d bytes written", written)
 
-	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", c.bucketName, filename), nil
+	fileURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", c.bucketName, objectName)
+
+	return &service.FileUploadResult{
+		URL:        fileURL,
+		ObjectName: objectName,
+		Size:       written,
+	}, nil
 }
 
-func (c *CloudStorageClient) DeleteFile(ctx context.Context, fileURL string) error {
-	// Extract the object name from the URL
-	// Expected URL format: https://storage.googleapis.com/bucket-name/file-path
-	const prefix = "https://storage.googleapis.com/"
-	if !strings.HasPrefix(fileURL, prefix) {
-		return fmt.Errorf("invalid GCS URL format")
-	}
-
-	path := fileURL[len(prefix):]
-	parts := strings.SplitN(path, "/", 2)
-	if len(parts) != 2 || parts[0] != c.bucketName {
-		return fmt.Errorf("invalid GCS URL format or bucket mismatch")
-	}
-
-	objectName := parts[1]
+func (c *CloudStorageClient) DeleteFile(ctx context.Context, objectName string) error {
+	logger.Debug("Deleting file: %s from bucket %s", objectName, c.bucketName)
 
 	obj := c.client.Bucket(c.bucketName).Object(objectName)
 	if err := obj.Delete(ctx); err != nil {
 		return fmt.Errorf("failed to delete file: %v", err)
 	}
 
+	logger.Debug("File successfully deleted")
 	return nil
 }
 
-func (c *CloudStorageClient) GenerateSignedUploadURL(ctx context.Context, fileType, folder string, isPublic bool) (string, error) {
-	if isPublic {
-		folder = "public/" + folder
-	} else {
-		folder = "private/" + folder
-	}
+func (c *CloudStorageClient) GetFileContent(ctx context.Context, objectName string) (io.ReadCloser, string, int64, error) {
+	logger.Debug("Getting file content: %s", objectName)
 
-	filename := fmt.Sprintf("%s/%s-%s", folder, uuid.New().String(), time.Now().Format("20060102150405"))
+	obj := c.client.Bucket(c.bucketName).Object(objectName)
 
-	switch fileType {
-	case "image/jpeg", "image/jpg":
-		filename += ".jpg"
-	case "image/png":
-		filename += ".png"
-	case "image/gif":
-		filename += ".gif"
-	case "application/pdf":
-		filename += ".pdf"
-	default:
-		filename += ".bin"
-	}
-
-	opts := &storage.SignedURLOptions{
-		Method:      http.MethodPut,
-		ContentType: fileType,
-		Expires:     time.Now().Add(15 * time.Minute),
-	}
-
-	url, err := storage.SignedURL(c.bucketName, filename, opts)
+	attrs, err := obj.Attrs(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to generate signed URL: %v", err)
+		return nil, "", 0, fmt.Errorf("failed to get object attributes: %v", err)
 	}
 
-	return url, nil
+	reader, err := obj.NewReader(ctx)
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("failed to open file: %v", err)
+	}
+
+	return reader, attrs.ContentType, attrs.Size, nil
 }
 
 func (c *CloudStorageClient) Close() error {

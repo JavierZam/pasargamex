@@ -5,9 +5,18 @@ import (
 	"io"
 )
 
+type FileUploadResult struct {
+	URL        string
+	ObjectName string
+	Size       int64
+}
+
 type FileUploadService interface {
-	UploadFile(ctx context.Context, file io.Reader, fileType, folder string, isPublic bool) (string, error)
-	DeleteFile(ctx context.Context, fileURL string) error
-	GenerateSignedUploadURL(ctx context.Context, fileType, folder string, isPublic bool) (string, error)
+	UploadFile(ctx context.Context, file io.Reader, fileType, filename, folder string, isPublic bool) (*FileUploadResult, error)
+
+	DeleteFile(ctx context.Context, objectName string) error
+
+	GetFileContent(ctx context.Context, objectName string) (io.ReadCloser, string, int64, error)
+
 	Close() error
 }

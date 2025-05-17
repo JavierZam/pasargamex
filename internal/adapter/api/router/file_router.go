@@ -7,24 +7,29 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func SetupFileRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware) {
+func SetupFileRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddleware *middleware.AdminMiddleware) {
 	fileHandler := handler.GetFileHandler()
 
-	// Protected routes - require authentication
 	files := e.Group("/v1/files")
 	files.Use(authMiddleware.Authenticate)
 
-	// Generic file upload endpoint
 	files.POST("/upload", fileHandler.UploadFile)
 
-	// Specialized endpoints for specific file types
 	files.POST("/upload/product-image", fileHandler.UploadProductImage)
 	files.POST("/upload/profile-photo", fileHandler.UploadProfilePhoto)
 	files.POST("/upload/verification-document", fileHandler.UploadVerificationDocument)
 
-	// Entity-specific upload endpoints with auto-linking
-	files.POST("/upload/product/:productId/image", fileHandler.UploadAndLinkProductImage)
-
-	// File deletion
 	files.POST("/delete", fileHandler.DeleteFile)
+	files.GET("/list", fileHandler.ListUserFiles)
+
+	files.GET("/view/:id", fileHandler.ViewFile)
+
+	products := e.Group("/v1/products")
+	products.Use(authMiddleware.Authenticate)
+	products.POST("/:id/images", fileHandler.UploadAndLinkProductImage)
+
+	admin := e.Group("/v1/admin/files")
+	admin.Use(authMiddleware.Authenticate)
+	admin.Use(adminMiddleware.AdminOnly)
+	admin.GET("/view/:id", fileHandler.AdminViewFile)
 }
