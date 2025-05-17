@@ -73,8 +73,8 @@ func (c *CloudStorageClient) setBucketCORS(ctx context.Context) error {
 }
 
 func (c *CloudStorageClient) UploadFile(ctx context.Context, file io.Reader, fileType, folder string, isPublic bool) (string, error) {
-	if strings.HasPrefix(folder, "public/") || strings.HasPrefix(folder, "private/") {
-	} else {
+	// Add proper prefixes for public/private
+	if !strings.HasPrefix(folder, "public/") && !strings.HasPrefix(folder, "private/") {
 		if isPublic {
 			folder = "public/" + folder
 		} else {
@@ -82,8 +82,10 @@ func (c *CloudStorageClient) UploadFile(ctx context.Context, file io.Reader, fil
 		}
 	}
 
+	// Generate filename with UUID and timestamp
 	filename := fmt.Sprintf("%s/%s-%s", folder, uuid.New().String(), time.Now().Format("20060102150405"))
 
+	// Add file extension
 	switch fileType {
 	case "image/jpeg", "image/jpg":
 		filename += ".jpg"
@@ -97,10 +99,11 @@ func (c *CloudStorageClient) UploadFile(ctx context.Context, file io.Reader, fil
 		filename += ".bin"
 	}
 
+	// Create and upload object
 	obj := c.client.Bucket(c.bucketName).Object(filename)
 	wc := obj.NewWriter(ctx)
 	wc.ContentType = fileType
-	wc.CacheControl = "public, max-age=86400" // 1 day caching
+	wc.CacheControl = "public, max-age=86400"
 
 	if _, err := io.Copy(wc, file); err != nil {
 		return "", fmt.Errorf("failed to copy file to GCS: %v", err)
@@ -110,11 +113,7 @@ func (c *CloudStorageClient) UploadFile(ctx context.Context, file io.Reader, fil
 		return "", fmt.Errorf("failed to close writer: %v", err)
 	}
 
-	if isPublic {
-		if err := obj.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil {
-			return "", fmt.Errorf("failed to set ACL: %v", err)
-		}
-	}
+	// With uniform bucket-level access, ACLs are controlled at bucket level
 
 	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", c.bucketName, filename), nil
 }

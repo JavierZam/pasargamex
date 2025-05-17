@@ -7,7 +7,6 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// SetupFileRouter initializes file upload routes
 func SetupFileRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware) {
 	fileHandler := handler.GetFileHandler()
 
@@ -22,6 +21,9 @@ func SetupFileRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware) {
 	files.POST("/upload/product-image", fileHandler.UploadProductImage)
 	files.POST("/upload/profile-photo", fileHandler.UploadProfilePhoto)
 	files.POST("/upload/verification-document", fileHandler.UploadVerificationDocument)
+
+	// Entity-specific upload endpoints with auto-linking
+	files.POST("/upload/product/:productId/image", fileHandler.UploadAndLinkProductImage)
 
 	// File deletion
 	files.POST("/delete", fileHandler.DeleteFile)

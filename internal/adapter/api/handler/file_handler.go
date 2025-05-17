@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -20,46 +21,53 @@ import (
 type FileHandler struct {
 	fileService      service.FileUploadService
 	fileMetadataRepo repository.FileMetadataRepository
+	productRepo      repository.ProductRepository
 	maxFileSize      int64
 }
 
-func NewFileHandler(fileService service.FileUploadService, fileMetadataRepo repository.FileMetadataRepository) *FileHandler {
+func NewFileHandler(fileService service.FileUploadService, fileMetadataRepo repository.FileMetadataRepository, productRepo repository.ProductRepository) *FileHandler {
 	return &FileHandler{
 		fileService:      fileService,
 		fileMetadataRepo: fileMetadataRepo,
+		productRepo:      productRepo,
 		maxFileSize:      5 * 1024 * 1024,
 	}
+}
+
+func SetupFileHandler(fileService service.FileUploadService, fileMetadataRepo repository.FileMetadataRepository, productRepo repository.ProductRepository) {
+	fileHandler = NewFileHandler(fileService, fileMetadataRepo, productRepo)
 }
 
 var (
 	fileHandler *FileHandler
 )
 
-// Update this function to accept both services
-func SetupFileHandler(fileService service.FileUploadService, fileMetadataRepo repository.FileMetadataRepository) {
-	fileHandler = NewFileHandler(fileService, fileMetadataRepo)
-}
-
 func GetFileHandler() *FileHandler {
 	return fileHandler
 }
 
-// UploadFile handles file upload requests
 func (h *FileHandler) UploadFile(c echo.Context) error {
+	log.Printf("Starting file upload handler")
+
 	// Get the file from the request
 	file, err := c.FormFile("file")
 	if err != nil {
+		log.Printf("Error getting file from form: %v", err)
 		return response.Error(c, response.NewError("INVALID_FILE", "Missing or invalid file", http.StatusBadRequest))
 	}
 
+	log.Printf("Received file: %s, size: %d bytes, type: %s", file.Filename, file.Size, file.Header.Get("Content-Type"))
+
 	// Check file size
 	if file.Size > h.maxFileSize {
+		log.Printf("File too large: %d bytes (max: %d)", file.Size, h.maxFileSize)
 		return response.Error(c, response.NewError("FILE_TOO_LARGE", fmt.Sprintf("File size exceeds maximum allowed (%dMB)", h.maxFileSize/(1024*1024)), http.StatusBadRequest))
 	}
 
 	// Validate file type
 	fileType := file.Header.Get("Content-Type")
 	if !isAllowedFileType(fileType) {
+		log.Printf("Invalid file type: %s", fileType)
 		return response.Error(c, response.NewError("INVALID_FILE_TYPE", "File type not supported", http.StatusBadRequest))
 	}
 
@@ -72,6 +80,7 @@ func (h *FileHandler) UploadFile(c echo.Context) error {
 		// Sanitize folder name
 		folder = sanitizeFolderName(folder)
 	}
+	log.Printf("Using folder: %s", folder)
 
 	// Determine if file should be public
 	isPublicStr := c.FormValue("public")
@@ -79,50 +88,35 @@ func (h *FileHandler) UploadFile(c echo.Context) error {
 	if isPublicStr != "" {
 		isPublic, _ = strconv.ParseBool(isPublicStr)
 	}
+	log.Printf("Public file: %v", isPublic)
 
 	// Open the file
 	src, err := file.Open()
 	if err != nil {
+		log.Printf("Error opening file: %v", err)
 		return response.Error(c, response.NewError("FILE_READ_ERROR", "Unable to read file", http.StatusInternalServerError))
 	}
 	defer src.Close()
 
 	// Upload the file
+	log.Printf("Calling storage client UploadFile")
 	fileURL, err := h.fileService.UploadFile(c.Request().Context(), src, fileType, folder, isPublic)
 	if err != nil {
+		log.Printf("Error from storage client: %v", err)
 		return response.Error(c, response.NewError("UPLOAD_FAILED", fmt.Sprintf("Failed to upload file: %v", err), http.StatusInternalServerError))
 	}
+	log.Printf("Storage client returned URL: %s", fileURL)
 
-	// Save file metadata if repository is available
-	if h.fileMetadataRepo != nil {
-		// Get user ID from context (set by auth middleware)
-		userID, ok := c.Get("uid").(string)
-		if !ok {
-			userID = "anonymous" // Fallback if no user ID is found
-		}
-
-		// Get entity type and ID if provided
-		entityType := c.FormValue("entityType")
-		entityID := c.FormValue("entityId")
-
-		// Create metadata record
-		fileMetadata := &entity.FileMetadata{
-			ID:         uuid.New().String(),
-			URL:        fileURL,
-			EntityType: entityType,
-			EntityID:   entityID,
-			UploadedBy: userID,
-			IsPublic:   isPublic,
-			CreatedAt:  time.Now(),
-		}
-
-		if err := h.fileMetadataRepo.Create(c.Request().Context(), fileMetadata); err != nil {
-			// Log the error but don't fail the request
-			log.Printf("Failed to save file metadata: %v", err)
-		}
-	}
+	// Temporarily disable metadata storage for testing
+	/*
+	   // Save file metadata if repository is available
+	   if h.fileMetadataRepo != nil {
+	       // ... metadata code
+	   }
+	*/
 
 	// Return the file URL
+	log.Printf("Upload successful, returning URL to client")
 	return response.Success(c, map[string]string{
 		"url": fileURL,
 	})
@@ -144,16 +138,15 @@ func (h *FileHandler) DeleteFile(c echo.Context) error {
 	}
 
 	// Delete metadata if repository is available
-	if h.fileMetadataRepo != nil {
-		metadata, err := h.fileMetadataRepo.GetByURL(c.Request().Context(), req.URL)
-		if err == nil && metadata != nil {
-			// We found metadata, delete it
-			if err := h.fileMetadataRepo.Delete(c.Request().Context(), metadata.ID); err != nil {
-				log.Printf("Failed to delete file metadata: %v", err)
-				// Continue with deletion anyway
-			}
-		}
-	}
+	// if h.fileMetadataRepo != nil {
+	// 	metadata, err := h.fileMetadataRepo.GetByURL(c.Request().Context(), req.URL)
+	// 	if err == nil && metadata != nil {
+	// 		if err := h.fileMetadataRepo.Delete(c.Request().Context(), metadata.ID); err != nil {
+	// 			log.Printf("Failed to delete file metadata: %v", err)
+	// 			// Continue with deletion anyway
+	// 		}
+	// 	}
+	// }
 
 	// Delete the file
 	if err := h.fileService.DeleteFile(c.Request().Context(), req.URL); err != nil {
@@ -205,25 +198,27 @@ func sanitizeFolderName(folder string) string {
 	return sanitized
 }
 
-// Helper methods for common upload scenarios
-
-// UploadProductImage is a convenience method for product images
 func (h *FileHandler) UploadProductImage(c echo.Context) error {
-	// Initialize Form if it's nil
-	if c.Request().Form == nil {
-		c.Request().ParseMultipartForm(h.maxFileSize)
+	log.Printf("Product image upload requested")
+
+	// First parse the multipart form
+	err := c.Request().ParseMultipartForm(h.maxFileSize)
+	if err != nil {
+		log.Printf("Failed to parse multipart form: %v", err)
+		// Continue anyway, the file might be parsable by Echo
 	}
 
-	// Override folder to product-images
+	// Initialize form if needed
+	if c.Request().Form == nil {
+		log.Printf("Request form was nil, initializing")
+		c.Request().Form = make(url.Values)
+	}
+
+	// Set form values
 	c.Request().Form.Set("folder", "product-images")
 	c.Request().Form.Set("public", "true")
-	c.Request().Form.Set("entityType", "product")
 
-	// Get product ID if provided
-	if productID := c.FormValue("productId"); productID != "" {
-		c.Request().Form.Set("entityId", productID)
-	}
-
+	log.Printf("Forwarding to main upload handler with folder=product-images")
 	return h.UploadFile(c)
 }
 
@@ -265,4 +260,103 @@ func (h *FileHandler) UploadVerificationDocument(c echo.Context) error {
 	}
 
 	return h.UploadFile(c)
+}
+
+func (h *FileHandler) UploadAndLinkProductImage(c echo.Context) error {
+	// Get product ID from path
+	productID := c.Param("productId")
+	if productID == "" {
+		return response.Error(c, response.NewError("MISSING_PRODUCT_ID", "Product ID is required", http.StatusBadRequest))
+	}
+
+	// Get user ID from context
+	userID, ok := c.Get("uid").(string)
+	if !ok {
+		return response.Error(c, response.NewError("UNAUTHORIZED", "Authentication required", http.StatusUnauthorized))
+	}
+
+	// Get the file from the request
+	file, err := c.FormFile("file")
+	if err != nil {
+		return response.Error(c, response.NewError("INVALID_FILE", "Missing or invalid file", http.StatusBadRequest))
+	}
+
+	// Check file size
+	if file.Size > h.maxFileSize {
+		return response.Error(c, response.NewError("FILE_TOO_LARGE", fmt.Sprintf("File size exceeds maximum allowed (%dMB)", h.maxFileSize/(1024*1024)), http.StatusBadRequest))
+	}
+
+	// Validate file type
+	fileType := file.Header.Get("Content-Type")
+	if !isAllowedFileType(fileType) {
+		return response.Error(c, response.NewError("INVALID_FILE_TYPE", "File type not supported", http.StatusBadRequest))
+	}
+
+	// Open the file
+	src, err := file.Open()
+	if err != nil {
+		return response.Error(c, response.NewError("FILE_READ_ERROR", "Unable to read file", http.StatusInternalServerError))
+	}
+	defer src.Close()
+
+	// Upload the file to product-images folder
+	fileURL, err := h.fileService.UploadFile(c.Request().Context(), src, fileType, "product-images", true)
+	if err != nil {
+		return response.Error(c, response.NewError("UPLOAD_FAILED", fmt.Sprintf("Failed to upload file: %v", err), http.StatusInternalServerError))
+	}
+
+	// We need to add productRepo to FileHandler - will need to inject this
+	// Get existing product
+	product, err := h.productRepo.GetByID(c.Request().Context(), productID)
+	if err != nil {
+		return response.Error(c, err)
+	}
+
+	// Check ownership
+	if product.SellerID != userID {
+		return response.Error(c, response.NewError("FORBIDDEN", "You don't have permission to update this product", http.StatusForbidden))
+	}
+
+	// Add the new image to product
+	displayOrder := 0
+	if len(product.Images) > 0 {
+		displayOrder = len(product.Images)
+	}
+
+	newImage := entity.ProductImage{
+		ID:           "img-" + time.Now().Format("20060102150405"),
+		URL:          fileURL,
+		DisplayOrder: displayOrder,
+	}
+
+	product.Images = append(product.Images, newImage)
+	product.UpdatedAt = time.Now()
+
+	// Update product in database
+	if err := h.productRepo.Update(c.Request().Context(), product); err != nil {
+		return response.Error(c, err)
+	}
+
+	// Save file metadata
+	if h.fileMetadataRepo != nil {
+		metadata := &entity.FileMetadata{
+			ID:         uuid.New().String(),
+			URL:        fileURL,
+			EntityType: "product",
+			EntityID:   productID,
+			UploadedBy: userID,
+			IsPublic:   true,
+			CreatedAt:  time.Now(),
+		}
+
+		if err := h.fileMetadataRepo.Create(c.Request().Context(), metadata); err != nil {
+			// Log error but don't fail the request
+			log.Printf("Failed to save file metadata: %v", err)
+		}
+	}
+
+	return response.Success(c, map[string]interface{}{
+		"url":     fileURL,
+		"product": product,
+	})
 }

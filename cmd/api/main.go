@@ -41,23 +41,34 @@ func main() {
 		serviceAccountPath = "./pasargamex-458303-firebase-adminsdk-fbsvc-f079266cd9.json"
 	}
 
+	// Verify service account file exists
+	if _, err := os.Stat(serviceAccountPath); os.IsNotExist(err) {
+		log.Fatalf("Service account file does not exist: %s", serviceAccountPath)
+	}
+
 	// Set up credentials option
 	opt := option.WithCredentialsFile(serviceAccountPath)
 
-	// Initialize Firebase App FIRST
+	// Initialize Firebase App
 	firebaseApp, err := fbapp.NewApp(ctx, &fbapp.Config{ProjectID: cfg.FirebaseProject}, opt)
 	if err != nil {
 		log.Fatalf("Failed to initialize Firebase: %v", err)
 	}
 
-	// Initialize Firestore client SECOND
+	// Initialize Firebase Auth
+	authClient, err := firebaseApp.Auth(ctx)
+	if err != nil {
+		log.Fatalf("Failed to initialize Firebase Auth: %v", err)
+	}
+
+	// Initialize Firestore client
 	firestoreClient, err := firestore.NewClient(ctx, cfg.FirebaseProject, opt)
 	if err != nil {
 		log.Fatalf("Failed to create Firestore client: %v", err)
 	}
 	defer firestoreClient.Close()
 
-	// Initialize Cloud Storage client THIRD
+	// Initialize Cloud Storage client
 	storageClient, err := storage.NewCloudStorageClient(
 		ctx,
 		cfg.StorageBucket,
@@ -69,25 +80,20 @@ func main() {
 	}
 	defer storageClient.Close()
 
-	// NOW we can use firestoreClient to create fileMetadataRepo
-	fileMetadataRepo := repository.NewFirestoreFileMetadataRepository(firestoreClient)
-	handler.SetupFileHandler(storageClient, fileMetadataRepo)
-
-	// Initialize Firebase Auth
-	authClient, err := firebaseApp.Auth(ctx)
-	if err != nil {
-		log.Fatalf("Failed to initialize Firebase Auth: %v", err)
-	}
-
 	// Initialize repositories
 	userRepo := repository.NewFirestoreUserRepository(firestoreClient)
 	gameTitleRepo := repository.NewFirestoreGameTitleRepository(firestoreClient)
 	productRepo := repository.NewFirestoreProductRepository(firestoreClient)
 	reviewRepo := repository.NewFirestoreReviewRepository(firestoreClient)
 	transactionRepo := repository.NewFirestoreTransactionRepository(firestoreClient)
+	fileMetadataRepo := repository.NewFirestoreFileMetadataRepository(firestoreClient)
 
 	// Initialize Firebase auth client adapter
 	firebaseAuthClient := firebase.NewFirebaseAuthClient(authClient, cfg.FirebaseApiKey)
+
+	// Setup handlers
+	handler.SetupFileHandler(storageClient, fileMetadataRepo, productRepo)
+	handler.SetupDevTokenHandler(firebaseAuthClient, userRepo)
 
 	// Initialize use cases
 	authUseCase := usecase.NewAuthUseCase(userRepo, firebaseAuthClient)
@@ -97,9 +103,8 @@ func main() {
 	reviewUseCase := usecase.NewReviewUseCase(reviewRepo, userRepo)
 	transactionUseCase := usecase.NewTransactionUseCase(transactionRepo, productRepo, userRepo)
 
-	// Setup handlers
+	// Setup main handler
 	handler.Setup(authUseCase, userUseCase, gameTitleUseCase, productUseCase, reviewUseCase, transactionUseCase)
-	handler.SetupDevTokenHandler(firebaseAuthClient, userRepo)
 
 	// Initialize Echo
 	e := echo.New()
@@ -121,6 +126,7 @@ func main() {
 		return c.JSON(200, map[string]string{"status": "ok"})
 	})
 
+	// Debug endpoint
 	e.GET("/v1/debug/me", func(c echo.Context) error {
 		// Get the Authorization header
 		authHeader := c.Request().Header.Get("Authorization")
