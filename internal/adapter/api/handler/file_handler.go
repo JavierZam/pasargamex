@@ -558,6 +558,135 @@ func (h *FileHandler) ListUserFiles(c echo.Context) error {
 	return response.Paginated(c, filesResponse, total, page, limit)
 }
 
+func (h *FileHandler) UploadMultipleProductImages(c echo.Context) error {
+	logger.Debug("Multiple product images upload requested")
+
+	// Parse multipart form with size limit
+	err := c.Request().ParseMultipartForm(h.maxFileSize * 10) // Allow larger total size
+	if err != nil {
+		return response.Error(c, errors.BadRequest("Failed to parse form", err))
+	}
+
+	// Get files from form
+	form := c.Request().MultipartForm
+	files := form.File["files"] // Note: "files" plural
+
+	if len(files) == 0 {
+		return response.Error(c, errors.BadRequest("No files provided", nil))
+	}
+
+	// Limit number of files
+	maxFiles := 10 // Adjust as needed
+	if len(files) > maxFiles {
+		return response.Error(c, errors.BadRequest(fmt.Sprintf("Too many files. Maximum %d allowed", maxFiles), nil))
+	}
+
+	userID := getUserIDFromContext(c)
+	if userID == "" {
+		return response.Error(c, errors.Unauthorized("Authentication required", nil))
+	}
+
+	var uploadedImages []map[string]interface{}
+	var errors []string
+
+	// Process each file
+	for i, fileHeader := range files {
+		logger.Debug("Processing file %d: %s", i+1, fileHeader.Filename)
+
+		// Validate file size
+		if fileHeader.Size > h.maxFileSize {
+			errors = append(errors, fmt.Sprintf("%s: file too large", fileHeader.Filename))
+			continue
+		}
+
+		// Validate file type
+		fileType := fileHeader.Header.Get("Content-Type")
+		if !isAllowedFileType(fileType) {
+			errors = append(errors, fmt.Sprintf("%s: invalid file type", fileHeader.Filename))
+			continue
+		}
+
+		// Open file
+		src, err := fileHeader.Open()
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("%s: failed to open", fileHeader.Filename))
+			continue
+		}
+		defer src.Close()
+
+		// Upload to storage
+		result, err := h.fileService.UploadFile(
+			c.Request().Context(),
+			src,
+			fileType,
+			fileHeader.Filename,
+			"product-images",
+			true,
+		)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("%s: upload failed", fileHeader.Filename))
+			continue
+		}
+
+		// Create file metadata
+		fileID := uuid.New().String()
+		metadata := &entity.FileMetadata{
+			ID:         fileID,
+			URL:        result.URL,
+			ObjectName: result.ObjectName,
+			EntityType: "product",
+			EntityID:   "", // Will be set when linked to product
+			UploadedBy: userID,
+			Filename:   fileHeader.Filename,
+			FileType:   fileType,
+			FileSize:   result.Size,
+			IsPublic:   true,
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+		}
+
+		// Save metadata
+		if err := h.fileMetadataRepo.Create(c.Request().Context(), metadata); err != nil {
+			logger.Error("Failed to save metadata for %s: %v", fileHeader.Filename, err)
+			// Continue anyway, file is uploaded
+		}
+
+		uploadedImages = append(uploadedImages, map[string]interface{}{
+			"id":       fileID,
+			"url":      result.URL,
+			"filename": fileHeader.Filename,
+			"size":     result.Size,
+			"public":   true,
+		})
+
+		logger.Debug("Successfully uploaded: %s", fileHeader.Filename)
+	}
+
+	// Prepare response
+	response := map[string]interface{}{
+		"uploaded_count": len(uploadedImages),
+		"images":         uploadedImages,
+	}
+
+	if len(errors) > 0 {
+		response["errors"] = errors
+		response["error_count"] = len(errors)
+	}
+
+	// Return success if at least one file uploaded
+	if len(uploadedImages) > 0 {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": true,
+			"data":    response,
+		})
+	} else {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"errors":  errors,
+		})
+	}
+}
+
 type recResponse struct {
 	header http.Header
 	body   strings.Builder

@@ -16,6 +16,7 @@ func SetupFileRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, ad
 	files.POST("/upload", fileHandler.UploadFile)
 
 	files.POST("/upload/product-image", fileHandler.UploadProductImage)
+	files.POST("/upload/product-images-multiple", fileHandler.UploadMultipleProductImages)
 	files.POST("/upload/profile-photo", fileHandler.UploadProfilePhoto)
 	files.POST("/upload/verification-document", fileHandler.UploadVerificationDocument)
 

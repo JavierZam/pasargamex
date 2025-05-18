@@ -27,6 +27,7 @@ func SetupProductRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware,
 	myProducts.PUT("/:id", productHandler.UpdateProduct)
 	myProducts.DELETE("/:id", productHandler.DeleteProduct)
 	myProducts.POST("/:id/bump", productHandler.BumpProduct)
+	myProducts.DELETE("/:id/images/:imageId", productHandler.DeleteProductImage)
 
 	admin := e.Group("/v1/admin/products")
 	admin.Use(authMiddleware.Authenticate)

@@ -266,6 +266,52 @@ func (uc *ProductUseCase) DeleteProduct(ctx context.Context, id string, sellerID
 	return uc.productRepo.SoftDelete(ctx, id)
 }
 
+func (uc *ProductUseCase) DeleteProductImage(ctx context.Context, productID, imageID, sellerID string) (*entity.Product, error) {
+	product, err := uc.productRepo.GetByID(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+
+	if product.SellerID != sellerID {
+		return nil, errors.Forbidden("You don't have permission", nil)
+	}
+
+	var imageToDelete *entity.ProductImage
+	filteredImages := []entity.ProductImage{}
+
+	for _, img := range product.Images {
+		if img.ID == imageID {
+			imageToDelete = &img
+		} else {
+			filteredImages = append(filteredImages, img)
+		}
+	}
+
+	if imageToDelete == nil {
+		return nil, errors.NotFound("Image not found", nil)
+	}
+
+	for i := range filteredImages {
+		filteredImages[i].DisplayOrder = i
+	}
+
+	product.Images = filteredImages
+	product.UpdatedAt = time.Now()
+
+	err = uc.productRepo.Update(ctx, product)
+	if err != nil {
+		return nil, errors.Internal("Failed to update product", err)
+	}
+
+	// 5. OPTIONAL: Clean up storage
+	// You can implement this by calling a file cleanup service
+	// For now, we'll keep images in storage for safety
+
+	log.Printf("Image %s removed from product %s", imageID, productID)
+
+	return product, nil
+}
+
 func generateUUID() string {
 
 	return "img-" + time.Now().Format("20060102150405-999999999")

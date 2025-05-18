@@ -308,6 +308,31 @@ func (h *ProductHandler) DeleteProduct(c echo.Context) error {
 	})
 }
 
+func (h *ProductHandler) DeleteProductImage(c echo.Context) error {
+	productID := c.Param("id")
+	imageID := c.Param("imageId")
+
+	if productID == "" {
+		return response.Error(c, errors.BadRequest("Product ID is required", nil))
+	}
+
+	if imageID == "" {
+		return response.Error(c, errors.BadRequest("Image ID is required", nil))
+	}
+
+	sellerID := c.Get("uid").(string)
+
+	product, err := h.productUseCase.DeleteProductImage(c.Request().Context(), productID, imageID, sellerID)
+	if err != nil {
+		return response.Error(c, err)
+	}
+
+	return response.Success(c, map[string]interface{}{
+		"message": "Image deleted successfully",
+		"product": product,
+	})
+}
+
 func (h *ProductHandler) BumpProduct(c echo.Context) error {
 	id := c.Param("id")
 
