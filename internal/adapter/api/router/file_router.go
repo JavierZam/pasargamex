@@ -28,6 +28,7 @@ func SetupFileRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, ad
 	products := e.Group("/v1/products")
 	products.Use(authMiddleware.Authenticate)
 	products.POST("/:id/images", fileHandler.UploadAndLinkProductImage)
+	products.POST("/:id/images-multiple", fileHandler.UploadMultipleImagesToProduct)
 
 	admin := e.Group("/v1/admin/files")
 	admin.Use(authMiddleware.Authenticate)

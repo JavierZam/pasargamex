@@ -389,3 +389,54 @@ func (h *ProductHandler) ValidateCredentials(c echo.Context) error {
 		"message":    "Credentials have been validated",
 	})
 }
+
+func (h *ProductHandler) GetProductsBySeller(c echo.Context) error {
+	sellerID := c.Param("sellerId")
+	if sellerID == "" {
+		return response.Error(c, errors.BadRequest("Seller ID is required", nil))
+	}
+
+	productType := c.QueryParam("type")
+	status := c.QueryParam("status")
+
+	pagination := utils.GetPaginationParams(c)
+
+	products, total, err := h.productUseCase.ListProductsBySeller(
+		c.Request().Context(),
+		sellerID,
+		productType,
+		status,
+		pagination.Page,
+		pagination.PageSize,
+	)
+
+	if err != nil {
+		return response.Error(c, err)
+	}
+
+	return response.Paginated(c, products, total, pagination.Page, pagination.PageSize)
+}
+
+func (h *ProductHandler) GetSellerProfile(c echo.Context) error {
+	sellerID := c.Param("sellerId")
+	if sellerID == "" {
+		return response.Error(c, errors.BadRequest("Seller ID is required", nil))
+	}
+
+	productType := c.QueryParam("type")
+	pagination := utils.GetPaginationParams(c)
+
+	profileData, err := h.productUseCase.GetSellerProfileWithProducts(
+		c.Request().Context(),
+		sellerID,
+		productType,
+		pagination.Page,
+		pagination.PageSize,
+	)
+
+	if err != nil {
+		return response.Error(c, err)
+	}
+
+	return response.Success(c, profileData)
+}

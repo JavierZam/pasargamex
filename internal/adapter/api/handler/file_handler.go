@@ -587,29 +587,29 @@ func (h *FileHandler) UploadMultipleProductImages(c echo.Context) error {
 	}
 
 	var uploadedImages []map[string]interface{}
-	var errors []string
+	var uploadErrors []string // Fixed: renamed from 'errors' to avoid conflict
 
 	// Process each file
-	for i, fileHeader := range files {
-		logger.Debug("Processing file %d: %s", i+1, fileHeader.Filename)
+	for _, fileHeader := range files { // Fixed: removed unused 'i' variable
+		logger.Debug("Processing file: %s", fileHeader.Filename)
 
 		// Validate file size
 		if fileHeader.Size > h.maxFileSize {
-			errors = append(errors, fmt.Sprintf("%s: file too large", fileHeader.Filename))
+			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: file too large", fileHeader.Filename))
 			continue
 		}
 
 		// Validate file type
 		fileType := fileHeader.Header.Get("Content-Type")
 		if !isAllowedFileType(fileType) {
-			errors = append(errors, fmt.Sprintf("%s: invalid file type", fileHeader.Filename))
+			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: invalid file type", fileHeader.Filename))
 			continue
 		}
 
 		// Open file
 		src, err := fileHeader.Open()
 		if err != nil {
-			errors = append(errors, fmt.Sprintf("%s: failed to open", fileHeader.Filename))
+			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: failed to open", fileHeader.Filename))
 			continue
 		}
 		defer src.Close()
@@ -624,7 +624,7 @@ func (h *FileHandler) UploadMultipleProductImages(c echo.Context) error {
 			true,
 		)
 		if err != nil {
-			errors = append(errors, fmt.Sprintf("%s: upload failed", fileHeader.Filename))
+			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: upload failed", fileHeader.Filename))
 			continue
 		}
 
@@ -663,28 +663,161 @@ func (h *FileHandler) UploadMultipleProductImages(c echo.Context) error {
 	}
 
 	// Prepare response
-	response := map[string]interface{}{
+	responseData := map[string]interface{}{
 		"uploaded_count": len(uploadedImages),
 		"images":         uploadedImages,
 	}
 
-	if len(errors) > 0 {
-		response["errors"] = errors
-		response["error_count"] = len(errors)
+	if len(uploadErrors) > 0 {
+		responseData["errors"] = uploadErrors
+		responseData["error_count"] = len(uploadErrors)
 	}
 
 	// Return success if at least one file uploaded
 	if len(uploadedImages) > 0 {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"success": true,
-			"data":    response,
+			"data":    responseData,
 		})
 	} else {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"errors":  errors,
-		})
+		return response.Error(c, errors.BadRequest("No files were uploaded successfully", nil))
 	}
+}
+
+func (h *FileHandler) UploadMultipleImagesToProduct(c echo.Context) error {
+	logger.Debug("Multiple images upload to existing product requested")
+
+	productID := c.Param("id")
+	if productID == "" {
+		return response.Error(c, errors.BadRequest("Product ID is required", nil))
+	}
+
+	userID := getUserIDFromContext(c)
+	if userID == "" {
+		return response.Error(c, errors.Unauthorized("Authentication required", nil))
+	}
+
+	// Verify product ownership
+	product, err := h.productRepo.GetByID(c.Request().Context(), productID)
+	if err != nil {
+		return response.Error(c, err)
+	}
+
+	if product.SellerID != userID {
+		return response.Error(c, errors.Forbidden("You don't have permission to update this product", nil))
+	}
+
+	// Parse multipart form
+	err = c.Request().ParseMultipartForm(h.maxFileSize * 10)
+	if err != nil {
+		return response.Error(c, errors.BadRequest("Failed to parse form", err))
+	}
+
+	form := c.Request().MultipartForm
+	files := form.File["files"]
+
+	if len(files) == 0 {
+		return response.Error(c, errors.BadRequest("No files provided", nil))
+	}
+
+	// Limit total images per product
+	maxImagesPerProduct := 10
+	if len(product.Images)+len(files) > maxImagesPerProduct {
+		return response.Error(c, errors.BadRequest(fmt.Sprintf("Product can have maximum %d images", maxImagesPerProduct), nil))
+	}
+
+	var newImages []entity.ProductImage
+	var uploadErrors []string
+
+	// Process each file
+	for _, fileHeader := range files {
+		// Validate file
+		if fileHeader.Size > h.maxFileSize {
+			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: file too large", fileHeader.Filename))
+			continue
+		}
+
+		fileType := fileHeader.Header.Get("Content-Type")
+		if !isAllowedFileType(fileType) {
+			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: invalid file type", fileHeader.Filename))
+			continue
+		}
+
+		// Open and upload file
+		src, err := fileHeader.Open()
+		if err != nil {
+			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: failed to open", fileHeader.Filename))
+			continue
+		}
+		defer src.Close()
+
+		result, err := h.fileService.UploadFile(
+			c.Request().Context(),
+			src,
+			fileType,
+			fileHeader.Filename,
+			"product-images",
+			true,
+		)
+		if err != nil {
+			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: upload failed", fileHeader.Filename))
+			continue
+		}
+
+		// Create file metadata
+		fileID := uuid.New().String()
+		metadata := &entity.FileMetadata{
+			ID:         fileID,
+			URL:        result.URL,
+			ObjectName: result.ObjectName,
+			EntityType: "product",
+			EntityID:   productID,
+			UploadedBy: userID,
+			Filename:   fileHeader.Filename,
+			FileType:   fileType,
+			FileSize:   result.Size,
+			IsPublic:   true,
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+		}
+
+		h.fileMetadataRepo.Create(c.Request().Context(), metadata)
+
+		// Create product image entry
+		displayOrder := len(product.Images) + len(newImages)
+		newImage := entity.ProductImage{
+			ID:           fileID,
+			URL:          result.URL,
+			DisplayOrder: displayOrder,
+		}
+
+		newImages = append(newImages, newImage)
+	}
+
+	// Update product with new images
+	if len(newImages) > 0 {
+		product.Images = append(product.Images, newImages...)
+		product.UpdatedAt = time.Now()
+
+		err = h.productRepo.Update(c.Request().Context(), product)
+		if err != nil {
+			return response.Error(c, errors.Internal("Failed to update product", err))
+		}
+	}
+
+	// Prepare response
+	responseData := map[string]interface{}{
+		"uploaded_count": len(newImages),
+		"new_images":     newImages,
+		"product":        product,
+	}
+
+	if len(uploadErrors) > 0 {
+		responseData["errors"] = uploadErrors
+		responseData["error_count"] = len(uploadErrors)
+	}
+
+	return response.Success(c, responseData)
 }
 
 type recResponse struct {

@@ -428,3 +428,89 @@ func (uc *ProductUseCase) ValidateCredentials(ctx context.Context, adminID strin
 
 	return true, nil
 }
+
+func (uc *ProductUseCase) ListProductsBySeller(ctx context.Context, sellerID, productType, status string, page, limit int) ([]*entity.Product, int64, error) {
+	// Verify seller exists
+	_, err := uc.userRepo.GetByID(ctx, sellerID)
+	if err != nil {
+		return nil, 0, errors.NotFound("Seller not found", err)
+	}
+
+	// Build filter
+	filter := map[string]interface{}{
+		"sellerId": sellerID,
+	}
+
+	// Add type filter if specified
+	if productType != "" {
+		filter["type"] = productType
+	}
+
+	// Default to active products for public view
+	if status != "" {
+		filter["status"] = status
+	} else {
+		filter["status"] = "active" // Only show active products publicly
+	}
+
+	offset := (page - 1) * limit
+	if offset < 0 {
+		offset = 0
+	}
+
+	return uc.productRepo.List(ctx, filter, "bumped_at", limit, offset)
+}
+
+func (uc *ProductUseCase) GetSellerProfileWithProducts(ctx context.Context, sellerID string, productType string, page, limit int) (map[string]interface{}, error) {
+	// Get seller info
+	seller, err := uc.userRepo.GetByID(ctx, sellerID)
+	if err != nil {
+		return nil, errors.NotFound("Seller not found", err)
+	}
+
+	// Get seller's products
+	products, total, err := uc.ListProductsBySeller(ctx, sellerID, productType, "active", page, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// Hide credentials from all products (public view)
+	publicProducts := make([]*entity.Product, len(products))
+	for i, product := range products {
+		productCopy := *product
+		productCopy.Credentials = nil // Hide sensitive data
+		publicProducts[i] = &productCopy
+	}
+
+	// Group products by type for better display
+	productsByType := make(map[string][]*entity.Product)
+	for _, product := range publicProducts {
+		productsByType[product.Type] = append(productsByType[product.Type], product)
+	}
+
+	return map[string]interface{}{
+		"seller": map[string]interface{}{
+			"id":                  seller.ID,
+			"username":            seller.Username,
+			"seller_rating":       seller.SellerRating,
+			"review_count":        seller.SellerReviewCount,
+			"verification_status": seller.VerificationStatus,
+		},
+		"products":         publicProducts,
+		"products_by_type": productsByType,
+		"total_products":   total,
+		"pagination": map[string]interface{}{
+			"page":     page,
+			"limit":    limit,
+			"total":    total,
+			"has_next": int64(page*limit) < total,
+		},
+		"stats": map[string]interface{}{
+			"total_products": total,
+			"account_count":  len(productsByType["account"]),
+			"topup_count":    len(productsByType["topup"]),
+			"boosting_count": len(productsByType["boosting"]),
+			"item_count":     len(productsByType["item"]),
+		},
+	}, nil
+}

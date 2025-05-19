@@ -15,6 +15,8 @@ func SetupProductRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware,
 	products := e.Group("/v1/products")
 	products.GET("", productHandler.ListProducts)
 	e.GET("/v1/products/search", productHandler.SearchProducts)
+	products.GET("/seller/:sellerId", productHandler.GetProductsBySeller)
+	e.GET("/v1/sellers/:sellerId/profile", productHandler.GetSellerProfile)
 
 	productDetailGroup := e.Group("/v1/products")
 	productDetailGroup.Use(VerifyToken(authClient))
