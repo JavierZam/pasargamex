@@ -21,6 +21,7 @@ import (
 	"pasargamex/internal/adapter/repository"
 	"pasargamex/internal/infrastructure/firebase"
 	"pasargamex/internal/infrastructure/storage"
+	"pasargamex/internal/infrastructure/websocket"
 	"pasargamex/internal/usecase"
 	"pasargamex/pkg/config"
 )
@@ -117,9 +118,16 @@ func main() {
 	// Initialize validator
 	e.Validator = api.NewValidator()
 
+	// Initialize WebSocket manager
+	wsManager := websocket.NewManager()
+	ctx = context.Background()
+	wsManager.Start(ctx)
+
 	// Auth middleware
 	authMiddleware := apimiddleware.NewAuthMiddleware(authClient)
 	adminMiddleware := apimiddleware.NewAdminMiddleware(userRepo)
+
+	wsHandler := handler.NewWebSocketHandler(wsManager, authMiddleware)
 
 	// Add health check endpoint
 	e.GET("/health", func(c echo.Context) error {
@@ -166,6 +174,7 @@ func main() {
 	// Setup routers
 	router.Setup(e, authMiddleware, adminMiddleware, authClient)
 	router.SetupDevRouter(e, cfg.Environment)
+	router.SetupWebSocketRouter(e, wsHandler, authMiddleware)
 
 	// Start server
 	log.Printf("Starting server on port %s...", cfg.ServerPort)

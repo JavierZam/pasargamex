@@ -1,6 +1,7 @@
 package router
 
 import (
+	"pasargamex/internal/adapter/api/handler"
 	"pasargamex/internal/adapter/api/middleware"
 
 	"firebase.google.com/go/v4/auth"
@@ -16,4 +17,9 @@ func Setup(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddlew
 	SetupHealthRouter(e)
 	SetupReviewRouter(e, authMiddleware, adminMiddleware)
 	SetupFileRouter(e, authMiddleware, adminMiddleware)
+}
+
+func SetupWebSocketRouter(e *echo.Echo, wsHandler *handler.WebSocketHandler, authMiddleware *middleware.AuthMiddleware) {
+	// WebSocket needs auth middleware before upgrading connection
+	e.GET("/ws", wsHandler.HandleWebSocket, authMiddleware.Authenticate)
 }
