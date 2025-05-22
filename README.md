@@ -125,6 +125,9 @@ The API follows RESTful principles with these main endpoints:
   - `GET /v1/files/view/:id` - View file
   - `POST /v1/files/delete` - Delete file
 
+- **Chat & Messaging**
+  - 
+
 ## Deployment
 
 The application is designed to be deployed on Google Cloud Platform using Cloud Run. The repository includes a Dockerfile and configuration for GCP deployment.
