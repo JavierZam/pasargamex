@@ -66,6 +66,32 @@ func Paginated(c echo.Context, items interface{}, total int64, page, pageSize in
 	})
 }
 
+// New method: SuccessPaginated for chat handler compatibility
+func SuccessPaginated(c echo.Context, items interface{}, total int64, limit, offset int) error {
+	// Calculate page and pageSize from limit and offset
+	page := (offset / limit) + 1
+	if offset == 0 {
+		page = 1
+	}
+	pageSize := limit
+
+	totalPages := int(total) / pageSize
+	if int(total)%pageSize > 0 {
+		totalPages++
+	}
+
+	return c.JSON(http.StatusOK, Response{
+		Success: true,
+		Data: PaginatedResponse{
+			Items:      items,
+			Total:      total,
+			Page:       page,
+			PageSize:   pageSize,
+			TotalPages: totalPages,
+		},
+	})
+}
+
 func Error(c echo.Context, err error) error {
 	var appErr *apperrors.AppError
 	if errors.As(err, &appErr) {

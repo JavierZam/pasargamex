@@ -89,8 +89,15 @@ func main() {
 	transactionRepo := repository.NewFirestoreTransactionRepository(firestoreClient)
 	fileMetadataRepo := repository.NewFirestoreFileMetadataRepository(firestoreClient)
 
+	// Initialize chat repository (NEW)
+	chatRepo := repository.NewFirestoreChatRepository(firestoreClient)
+
 	// Initialize Firebase auth client adapter
 	firebaseAuthClient := firebase.NewFirebaseAuthClient(authClient, cfg.FirebaseApiKey)
+
+	// Initialize WebSocket manager (MOVED UP)
+	wsManager := websocket.NewManager()
+	wsManager.Start(ctx)
 
 	// Setup handlers
 	handler.SetupFileHandler(storageClient, fileMetadataRepo, productRepo)
@@ -103,6 +110,9 @@ func main() {
 	productUseCase := usecase.NewProductUseCase(productRepo, gameTitleRepo, userRepo, transactionRepo)
 	reviewUseCase := usecase.NewReviewUseCase(reviewRepo, userRepo)
 	transactionUseCase := usecase.NewTransactionUseCase(transactionRepo, productRepo, userRepo)
+
+	// Initialize chat use case (NEW)
+	chatUseCase := usecase.NewChatUseCase(chatRepo, userRepo, productRepo, wsManager)
 
 	// Setup main handler
 	handler.Setup(authUseCase, userUseCase, gameTitleUseCase, productUseCase, reviewUseCase, transactionUseCase)
@@ -118,16 +128,12 @@ func main() {
 	// Initialize validator
 	e.Validator = api.NewValidator()
 
-	// Initialize WebSocket manager
-	wsManager := websocket.NewManager()
-	ctx = context.Background()
-	wsManager.Start(ctx)
-
 	// Auth middleware
 	authMiddleware := apimiddleware.NewAuthMiddleware(authClient)
 	adminMiddleware := apimiddleware.NewAdminMiddleware(userRepo)
 
-	wsHandler := handler.NewWebSocketHandler(wsManager, authMiddleware)
+	chatHandler := handler.NewChatHandler(chatUseCase)
+	wsHandler := handler.NewWebSocketHandlerWithAuth(wsManager, authClient)
 
 	// Add health check endpoint
 	e.GET("/health", func(c echo.Context) error {
@@ -171,10 +177,10 @@ func main() {
 		})
 	}, authMiddleware.Authenticate)
 
-	// Setup routers
 	router.Setup(e, authMiddleware, adminMiddleware, authClient)
 	router.SetupDevRouter(e, cfg.Environment)
-	router.SetupWebSocketRouter(e, wsHandler, authMiddleware)
+	router.SetupChatRouter(e, chatHandler, authMiddleware)
+	router.SetupWebSocketRouter(e, wsHandler)
 
 	// Start server
 	log.Printf("Starting server on port %s...", cfg.ServerPort)
