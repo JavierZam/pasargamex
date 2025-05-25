@@ -57,122 +57,103 @@ type MessageResponse struct {
 }
 
 func (uc *ChatUseCase) CreateChat(ctx context.Context, userID string, input CreateChatInput) (*ChatResponse, error) {
-	// Validate recipient exists
 	recipient, err := uc.userRepo.GetByID(ctx, input.RecipientID)
 	if err != nil {
+		log.Printf("CreateChat Error: Recipient %s not found: %v", input.RecipientID, err)
 		return nil, errors.NotFound("Recipient not found", err)
 	}
 
-	// Validate product if provided
 	var product *entity.Product
 	if input.ProductID != "" {
 		product, err = uc.productRepo.GetByID(ctx, input.ProductID)
 		if err != nil {
+			log.Printf("CreateChat Error: Product %s not found: %v", input.ProductID, err)
 			return nil, errors.NotFound("Product not found", err)
 		}
 	}
 
-	// Check if chat already exists between these users for this product
-	existingChat, err := uc.findExistingChat(ctx, userID, input.RecipientID, input.ProductID)
+	var chatToReturn *entity.Chat
+
+	existingChat, err := uc.findExistingChat(ctx, userID, input.RecipientID)
 	if err == nil && existingChat != nil {
-		// Chat already exists, return it
-		log.Printf("Found existing chat: %s between users %s and %s for product %s",
-			existingChat.ID, userID, input.RecipientID, input.ProductID)
+		log.Printf("CreateChat: Found existing chat %s between users %s and %s. Reusing this chat.",
+			existingChat.ID, userID, input.RecipientID)
+		chatToReturn = existingChat
+	} else {
+		if err != nil && !errors.Is(err, "NOT_FOUND") {
+			log.Printf("CreateChat Error: Failed to search for existing chat: %v", err)
+			return nil, err
+		}
 
-		return &ChatResponse{
-			Chat:      existingChat,
-			Product:   product,
-			OtherUser: recipient,
-		}, nil
+		newChat := &entity.Chat{
+			Participants:  []string{userID, input.RecipientID},
+			ProductID:     input.ProductID,
+			Type:          "direct",
+			UnreadCount:   make(map[string]int),
+			LastMessageAt: time.Now(),
+		}
+
+		if err := uc.chatRepo.Create(ctx, newChat); err != nil {
+			log.Printf("CreateChat Error: Failed to create new chat in repository: %v", err)
+			return nil, err
+		}
+		chatToReturn = newChat
+		log.Printf("CreateChat: Successfully created new chat %s", chatToReturn.ID)
 	}
 
-	log.Printf("Creating new chat between users %s and %s for product %s",
-		userID, input.RecipientID, input.ProductID)
-
-	// Create new chat
-	chat := &entity.Chat{
-		Participants:  []string{userID, input.RecipientID},
-		ProductID:     input.ProductID,
-		Type:          "direct",
-		UnreadCount:   make(map[string]int),
-		LastMessageAt: time.Now(),
-	}
-
-	if err := uc.chatRepo.Create(ctx, chat); err != nil {
-		return nil, err
-	}
-
-	// If there's an initial message, create it
 	if input.InitialMessage != "" {
 		messageResp, err := uc.SendMessage(ctx, userID, SendMessageInput{
-			ChatID:  chat.ID,
+			ChatID:  chatToReturn.ID,
 			Content: input.InitialMessage,
 			Type:    "text",
 		})
 		if err != nil {
+			log.Printf("CreateChat Error: Failed to send initial message for chat %s: %v", chatToReturn.ID, err)
 			return nil, err
 		}
 
-		// Update chat with last message
-		chat.LastMessage = input.InitialMessage
-		chat.LastMessageAt = messageResp.CreatedAt
-		chat.UnreadCount[input.RecipientID] = 1
-
-		if err := uc.chatRepo.Update(ctx, chat); err != nil {
-			return nil, err
+		chatToReturn.LastMessage = input.InitialMessage
+		chatToReturn.LastMessageAt = messageResp.CreatedAt
+		if chatToReturn.UnreadCount == nil {
+			chatToReturn.UnreadCount = make(map[string]int)
 		}
+		for _, participantID := range chatToReturn.Participants {
+			if participantID != userID {
+				chatToReturn.UnreadCount[participantID]++
+			}
+		}
+
+		if err := uc.chatRepo.Update(ctx, chatToReturn); err != nil {
+			log.Printf("CreateChat Error: Failed to update chat %s with last message after initial message: %v", chatToReturn.ID, err)
+		}
+		log.Printf("CreateChat: Successfully sent initial message to chat %s", chatToReturn.ID)
 	}
 
 	return &ChatResponse{
-		Chat:      chat,
+		Chat:      chatToReturn,
 		Product:   product,
 		OtherUser: recipient,
 	}, nil
 }
 
-// Add new helper function to find existing chat
-func (uc *ChatUseCase) findExistingChat(ctx context.Context, userID1, userID2, productID string) (*entity.Chat, error) {
-	log.Printf("Looking for existing chat between %s and %s for product %s", userID1, userID2, productID)
-
-	// Get all chats for user1
-	chats1, _, err := uc.chatRepo.ListByUserID(ctx, userID1, 100, 0)
+func (uc *ChatUseCase) findExistingChat(ctx context.Context, userID1, userID2 string) (*entity.Chat, error) {
+	chats1, _, err := uc.chatRepo.ListByUserID(ctx, userID1, -1, 0) // Use -1 limit to fetch all
 	if err != nil {
-		log.Printf("Error getting chats for user %s: %v", userID1, err)
-		return nil, err
+		log.Printf("findExistingChat Error: Failed to list chats for user %s: %v", userID1, err)
+		return nil, errors.Internal("Failed to list chats for user", err)
 	}
 
-	log.Printf("Found %d chats for user %s", len(chats1), userID1)
-
-	// Check each chat
 	for _, chat := range chats1 {
-		log.Printf("Checking chat %s: participants=%v, productID=%s",
-			chat.ID, chat.Participants, chat.ProductID)
-
-		// Check if it's a direct chat between the two users
-		if len(chat.Participants) == 2 &&
-			containsString(chat.Participants, userID1) &&
-			containsString(chat.Participants, userID2) {
-
-			// Check product ID match
-			// Both should be empty OR both should be the same
-			if (productID == "" && chat.ProductID == "") ||
-				(productID != "" && chat.ProductID == productID) {
-				log.Printf("Found existing chat: %s", chat.ID)
+		if chat.Type == "direct" && len(chat.Participants) == 2 {
+			if containsString(chat.Participants, userID1) && containsString(chat.Participants, userID2) {
 				return chat, nil
-			} else {
-				log.Printf("Product ID mismatch: wanted=%s, found=%s", productID, chat.ProductID)
 			}
-		} else {
-			log.Printf("Participants mismatch: wanted=[%s,%s], found=%v",
-				userID1, userID2, chat.Participants)
 		}
 	}
 
-	log.Printf("No existing chat found")
 	return nil, errors.NotFound("No existing chat found", nil)
 }
 
-// Update helper function name to be more specific
 func containsString(slice []string, item string) bool {
 	for _, s := range slice {
 		if s == item {
@@ -183,41 +164,40 @@ func containsString(slice []string, item string) bool {
 }
 
 func (uc *ChatUseCase) SendMessage(ctx context.Context, userID string, input SendMessageInput) (*MessageResponse, error) {
-	// Validate chat exists and user is participant
 	chat, err := uc.chatRepo.GetByID(ctx, input.ChatID)
 	if err != nil {
+		log.Printf("SendMessage Error: Chat %s not found: %v", input.ChatID, err)
 		return nil, err
 	}
 
-	if !contains(chat.Participants, userID) {
+	if !containsString(chat.Participants, userID) {
+		log.Printf("SendMessage Error: User %s is not a participant in chat %s", userID, input.ChatID)
 		return nil, errors.Forbidden("User is not a participant in this chat", nil)
 	}
 
-	// Get sender info
 	sender, err := uc.userRepo.GetByID(ctx, userID)
 	if err != nil {
+		log.Printf("SendMessage Error: Sender %s not found: %v", userID, err)
 		return nil, errors.NotFound("Sender not found", err)
 	}
 
-	// Create message
 	message := &entity.Message{
 		ChatID:    input.ChatID,
 		SenderID:  userID,
 		Content:   input.Content,
 		Type:      input.Type,
-		ReadBy:    []string{userID}, // Sender automatically reads their own message
+		ReadBy:    []string{userID},
 		CreatedAt: time.Now(),
 	}
 
 	if err := uc.chatRepo.CreateMessage(ctx, message); err != nil {
+		log.Printf("SendMessage Error: Failed to create message for chat %s: %v", input.ChatID, err)
 		return nil, err
 	}
 
-	// Update chat last message info
 	chat.LastMessage = input.Content
 	chat.LastMessageAt = message.CreatedAt
 
-	// Update unread count for other participants
 	if chat.UnreadCount == nil {
 		chat.UnreadCount = make(map[string]int)
 	}
@@ -229,10 +209,10 @@ func (uc *ChatUseCase) SendMessage(ctx context.Context, userID string, input Sen
 	}
 
 	if err := uc.chatRepo.Update(ctx, chat); err != nil {
+		log.Printf("SendMessage Error: Failed to update chat %s with last message: %v", chat.ID, err)
 		return nil, err
 	}
 
-	// Send real-time notification to other participants
 	notification := map[string]interface{}{
 		"type":    "new_message",
 		"chat_id": input.ChatID,
@@ -256,6 +236,7 @@ func (uc *ChatUseCase) SendMessage(ctx context.Context, userID string, input Sen
 func (uc *ChatUseCase) GetUserChats(ctx context.Context, userID string, limit, offset int) ([]*ChatResponse, int64, error) {
 	chats, total, err := uc.chatRepo.ListByUserID(ctx, userID, limit, offset)
 	if err != nil {
+		log.Printf("GetUserChats Error: Failed to list chats for user %s: %v", userID, err)
 		return nil, 0, err
 	}
 
@@ -264,20 +245,22 @@ func (uc *ChatUseCase) GetUserChats(ctx context.Context, userID string, limit, o
 	for _, chat := range chats {
 		chatResp := &ChatResponse{Chat: chat}
 
-		// Get product info if exists
 		if chat.ProductID != "" {
 			product, err := uc.productRepo.GetByID(ctx, chat.ProductID)
-			if err == nil { // Don't fail if product not found
+			if err == nil {
 				chatResp.Product = product
+			} else {
+				log.Printf("GetUserChats Warning: Product %s not found for chat %s: %v", chat.ProductID, chat.ID, err)
 			}
 		}
 
-		// Get other user info
 		for _, participantID := range chat.Participants {
 			if participantID != userID {
 				otherUser, err := uc.userRepo.GetByID(ctx, participantID)
-				if err == nil { // Don't fail if user not found
+				if err == nil {
 					chatResp.OtherUser = otherUser
+				} else {
+					log.Printf("GetUserChats Warning: Other user %s not found for chat %s: %v", participantID, chat.ID, err)
 				}
 				break
 			}
@@ -290,18 +273,20 @@ func (uc *ChatUseCase) GetUserChats(ctx context.Context, userID string, limit, o
 }
 
 func (uc *ChatUseCase) GetChatMessages(ctx context.Context, userID, chatID string, limit, offset int) ([]*MessageResponse, int64, error) {
-	// Validate user can access this chat
 	chat, err := uc.chatRepo.GetByID(ctx, chatID)
 	if err != nil {
+		log.Printf("GetChatMessages Error: Chat %s not found: %v", chatID, err)
 		return nil, 0, err
 	}
 
-	if !contains(chat.Participants, userID) {
+	if !containsString(chat.Participants, userID) {
+		log.Printf("GetChatMessages Error: User %s is not a participant in chat %s", userID, chatID)
 		return nil, 0, errors.Forbidden("User is not a participant in this chat", nil)
 	}
 
 	messages, total, err := uc.chatRepo.GetMessagesByChat(ctx, chatID, limit, offset)
 	if err != nil {
+		log.Printf("GetChatMessages Error: Failed to get messages for chat %s: %v", chatID, err)
 		return nil, 0, err
 	}
 
@@ -310,10 +295,11 @@ func (uc *ChatUseCase) GetChatMessages(ctx context.Context, userID, chatID strin
 	for _, message := range messages {
 		messageResp := &MessageResponse{Message: message}
 
-		// Get sender info
 		sender, err := uc.userRepo.GetByID(ctx, message.SenderID)
-		if err == nil { // Don't fail if sender not found
+		if err == nil {
 			messageResp.Sender = sender
+		} else {
+			log.Printf("GetChatMessages Warning: Sender %s not found for message %s in chat %s: %v", message.SenderID, message.ID, chatID, err)
 		}
 
 		messageResponses = append(messageResponses, messageResp)
@@ -323,51 +309,60 @@ func (uc *ChatUseCase) GetChatMessages(ctx context.Context, userID, chatID strin
 }
 
 func (uc *ChatUseCase) MarkChatAsRead(ctx context.Context, userID, chatID string) error {
-	// Validate user can access this chat
 	chat, err := uc.chatRepo.GetByID(ctx, chatID)
 	if err != nil {
+		log.Printf("MarkChatAsRead Error: Chat %s not found: %v", chatID, err)
 		return err
 	}
 
-	if !contains(chat.Participants, userID) {
+	if !containsString(chat.Participants, userID) {
+		log.Printf("MarkChatAsRead Error: User %s is not a participant in chat %s", userID, chatID)
 		return errors.Forbidden("User is not a participant in this chat", nil)
 	}
 
-	// Reset unread count for this user
 	if chat.UnreadCount == nil {
 		chat.UnreadCount = make(map[string]int)
 	}
 	chat.UnreadCount[userID] = 0
 
-	return uc.chatRepo.Update(ctx, chat)
+	if err := uc.chatRepo.Update(ctx, chat); err != nil {
+		log.Printf("MarkChatAsRead Error: Failed to update chat %s unread count for user %s: %v", chatID, userID, err)
+		return err
+	}
+
+	return nil
 }
 
 func (uc *ChatUseCase) GetChatByID(ctx context.Context, userID, chatID string) (*ChatResponse, error) {
 	chat, err := uc.chatRepo.GetByID(ctx, chatID)
 	if err != nil {
+		log.Printf("GetChatByID Error: Chat %s not found: %v", chatID, err)
 		return nil, err
 	}
 
-	if !contains(chat.Participants, userID) {
+	if !containsString(chat.Participants, userID) {
+		log.Printf("GetChatByID Error: User %s is not a participant in chat %s", userID, chatID)
 		return nil, errors.Forbidden("User is not a participant in this chat", nil)
 	}
 
 	chatResp := &ChatResponse{Chat: chat}
 
-	// Get product info if exists
 	if chat.ProductID != "" {
 		product, err := uc.productRepo.GetByID(ctx, chat.ProductID)
 		if err == nil {
 			chatResp.Product = product
+		} else {
+			log.Printf("GetChatByID Warning: Product %s not found for chat %s: %v", chat.ProductID, chat.ID, err)
 		}
 	}
 
-	// Get other user info
 	for _, participantID := range chat.Participants {
 		if participantID != userID {
 			otherUser, err := uc.userRepo.GetByID(ctx, participantID)
 			if err == nil {
 				chatResp.OtherUser = otherUser
+			} else {
+				log.Printf("GetChatByID Warning: Other user %s not found for chat %s: %v", participantID, chat.ID, err)
 			}
 			break
 		}
@@ -376,7 +371,6 @@ func (uc *ChatUseCase) GetChatByID(ctx context.Context, userID, chatID string) (
 	return chatResp, nil
 }
 
-// Helper function to check if slice contains string
 func contains(slice []string, item string) bool {
 	for _, s := range slice {
 		if s == item {

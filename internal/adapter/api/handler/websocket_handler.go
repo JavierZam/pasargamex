@@ -1,3 +1,5 @@
+// Update internal/adapter/api/handler/websocket_handler.go
+
 package handler
 
 import (

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"log" // Tetap impor untuk error logging
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -49,7 +50,6 @@ func (r *firestoreChatRepository) CreateMessage(ctx context.Context, message *en
 
 	message.CreatedAt = time.Now()
 
-	// Use subcollection for messages
 	_, err := r.client.Collection("chats").Doc(message.ChatID).Collection("messages").Doc(message.ID).Set(ctx, message)
 	if err != nil {
 		return errors.Internal("Failed to create message", err)
@@ -61,14 +61,13 @@ func (r *firestoreChatRepository) CreateMessage(ctx context.Context, message *en
 func (r *firestoreChatRepository) GetMessagesByChat(ctx context.Context, chatID string, limit, offset int) ([]*entity.Message, int64, error) {
 	query := r.client.Collection("chats").Doc(chatID).Collection("messages").OrderBy("createdAt", firestore.Desc)
 
-	// Get total count
 	countDocs, err := query.Documents(ctx).GetAll()
 	if err != nil {
-		return nil, 0, errors.Internal("Failed to count messages", err)
+		log.Printf("Firestore error while counting messages for chat %s: %v", chatID, err) // Keep for debugging index issues
+		return nil, 0, errors.Internal("Failed to count messages for chat", err)
 	}
 	total := int64(len(countDocs))
 
-	// Apply pagination
 	if limit > 0 {
 		query = query.Limit(limit)
 	}
@@ -76,7 +75,6 @@ func (r *firestoreChatRepository) GetMessagesByChat(ctx context.Context, chatID 
 		query = query.Offset(offset)
 	}
 
-	// Execute query
 	iter := query.Documents(ctx)
 	var messages []*entity.Message
 
@@ -86,11 +84,13 @@ func (r *firestoreChatRepository) GetMessagesByChat(ctx context.Context, chatID 
 			break
 		}
 		if err != nil {
+			log.Printf("Firestore error while iterating messages for chat %s: %v", chatID, err) // Keep for debugging
 			return nil, 0, errors.Internal("Failed to iterate messages", err)
 		}
 
 		var message entity.Message
 		if err := doc.DataTo(&message); err != nil {
+			log.Printf("Error parsing message data for chat %s: %v", chatID, err) // Keep for debugging
 			return nil, 0, errors.Internal("Failed to parse message data", err)
 		}
 
@@ -101,10 +101,6 @@ func (r *firestoreChatRepository) GetMessagesByChat(ctx context.Context, chatID 
 }
 
 func (r *firestoreChatRepository) UpdateMessageReadStatus(ctx context.Context, messageID string, userID string) error {
-	// This assumes you know which chat the message belongs to
-	// You might need to store the chatID with the messageID to make this more efficient
-
-	// First get all chats to find the message
 	iter := r.client.CollectionGroup("messages").Where("id", "==", messageID).Limit(1).Documents(ctx)
 	doc, err := iter.Next()
 
@@ -115,23 +111,19 @@ func (r *firestoreChatRepository) UpdateMessageReadStatus(ctx context.Context, m
 		return errors.Internal("Failed to get message", err)
 	}
 
-	// Get the message and update read status
 	var message entity.Message
 	if err := doc.DataTo(&message); err != nil {
 		return errors.Internal("Failed to parse message data", err)
 	}
 
-	// Check if user already marked as read
 	for _, reader := range message.ReadBy {
 		if reader == userID {
-			return nil // Already marked as read
+			return nil
 		}
 	}
 
-	// Add user to read list
 	message.ReadBy = append(message.ReadBy, userID)
 
-	// Update the message
 	_, err = doc.Ref.Set(ctx, message)
 	if err != nil {
 		return errors.Internal("Failed to update message read status", err)
@@ -160,22 +152,20 @@ func (r *firestoreChatRepository) GetByID(ctx context.Context, id string) (*enti
 func (r *firestoreChatRepository) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*entity.Chat, int64, error) {
 	query := r.client.Collection("chats").Where("participants", "array-contains", userID).OrderBy("updatedAt", firestore.Desc)
 
-	// Get total count
 	countDocs, err := query.Documents(ctx).GetAll()
 	if err != nil {
+		log.Printf("Firestore error while counting chats for user %s: %v", userID, err) // Keep for debugging index issues
 		return nil, 0, errors.Internal("Failed to count chats", err)
 	}
 	total := int64(len(countDocs))
 
-	// Apply pagination
-	if limit > 0 {
+	if limit != -1 && limit > 0 {
 		query = query.Limit(limit)
 	}
 	if offset > 0 {
 		query = query.Offset(offset)
 	}
 
-	// Execute query
 	iter := query.Documents(ctx)
 	var chats []*entity.Chat
 
@@ -185,11 +175,13 @@ func (r *firestoreChatRepository) ListByUserID(ctx context.Context, userID strin
 			break
 		}
 		if err != nil {
+			log.Printf("Firestore error while iterating chats for user %s: %v", userID, err) // Keep for debugging
 			return nil, 0, errors.Internal("Failed to iterate chats", err)
 		}
 
 		var chat entity.Chat
 		if err := doc.DataTo(&chat); err != nil {
+			log.Printf("Error parsing chat data for user %s: %v", userID, err) // Keep for debugging
 			return nil, 0, errors.Internal("Failed to parse chat data", err)
 		}
 
