@@ -137,7 +137,7 @@ func (uc *ChatUseCase) CreateChat(ctx context.Context, userID string, input Crea
 }
 
 func (uc *ChatUseCase) findExistingChat(ctx context.Context, userID1, userID2 string) (*entity.Chat, error) {
-	chats1, _, err := uc.chatRepo.ListByUserID(ctx, userID1, -1, 0) // Use -1 limit to fetch all
+	chats1, _, err := uc.chatRepo.ListByUserID(ctx, userID1, -1, 0)
 	if err != nil {
 		log.Printf("findExistingChat Error: Failed to list chats for user %s: %v", userID1, err)
 		return nil, errors.Internal("Failed to list chats for user", err)
@@ -378,4 +378,102 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+// New: HandleTypingEvent broadcasts typing status to chat room participants
+func (uc *ChatUseCase) HandleTypingEvent(ctx context.Context, userID, chatID string, isTyping bool) {
+	// Get chat to ensure user is a participant
+	chat, err := uc.chatRepo.GetByID(ctx, chatID)
+	if err != nil {
+		log.Printf("HandleTypingEvent Error: Chat %s not found: %v", chatID, err)
+		return
+	}
+	if !containsString(chat.Participants, userID) {
+		log.Printf("HandleTypingEvent Error: User %s is not a participant in chat %s", userID, chatID)
+		return
+	}
+
+	// Get sender info to include in notification
+	sender, err := uc.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		log.Printf("HandleTypingEvent Error: Sender %s not found: %v", userID, err)
+		return
+	}
+
+	notification := map[string]interface{}{
+		"type":      "typing_indicator",
+		"chat_id":   chatID,
+		"user_id":   userID,
+		"username":  sender.Username,
+		"is_typing": isTyping,
+	}
+
+	notificationJSON, _ := json.Marshal(notification)
+	uc.wsManager.SendToChatRoom(chatID, notificationJSON, userID) // Send to all in room except sender
+}
+
+// New: MarkMessageAsRead marks a specific message as read and notifies sender
+func (uc *ChatUseCase) MarkMessageAsRead(ctx context.Context, chatID, messageID, userID string) {
+	// Ensure user is participant of chat
+	chat, err := uc.chatRepo.GetByID(ctx, chatID)
+	if err != nil {
+		log.Printf("MarkMessageAsRead Error: Chat %s not found: %v", chatID, err)
+		return
+	}
+	if !containsString(chat.Participants, userID) {
+		log.Printf("MarkMessageAsRead Error: User %s is not a participant in chat %s", userID, chatID)
+		return
+	}
+
+	// Mark message as read in repository
+	err = uc.chatRepo.UpdateMessageReadStatus(ctx, messageID, userID)
+	if err != nil {
+		log.Printf("MarkMessageAsRead Error: Failed to update message %s read status for user %s: %v", messageID, userID, err)
+		return
+	}
+
+	// Notify other participants (especially sender) about read receipt
+	notification := map[string]interface{}{
+		"type":       "message_read_receipt",
+		"chat_id":    chatID,
+		"message_id": messageID,
+		"reader_id":  userID,
+	}
+	notificationJSON, _ := json.Marshal(notification)
+	uc.wsManager.SendToChatRoom(chatID, notificationJSON, userID) // Send to all in room except reader (usually sender)
+
+	// Optionally, update unread count for the chat itself (though MarkChatAsRead handles full chat)
+	// This might be for single message read receipts
+}
+
+// New: HandleUserPresence updates and broadcasts user's presence in a chat room
+func (uc *ChatUseCase) HandleUserPresence(ctx context.Context, userID, chatID string, isOnline bool) {
+	// Get chat to ensure user is a participant
+	chat, err := uc.chatRepo.GetByID(ctx, chatID)
+	if err != nil {
+		log.Printf("HandleUserPresence Error: Chat %s not found: %v", chatID, err)
+		return
+	}
+	if !containsString(chat.Participants, userID) {
+		log.Printf("HandleUserPresence Error: User %s is not a participant in chat %s", userID, chatID)
+		return
+	}
+
+	// Get user info
+	user, err := uc.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		log.Printf("HandleUserPresence Error: User %s not found: %v", userID, err)
+		return
+	}
+
+	notification := map[string]interface{}{
+		"type":      "user_presence",
+		"chat_id":   chatID,
+		"user_id":   userID,
+		"username":  user.Username,
+		"is_online": isOnline,
+	}
+
+	notificationJSON, _ := json.Marshal(notification)
+	uc.wsManager.SendToChatRoom(chatID, notificationJSON, userID) // Send to all in room except the user whose presence is updated
 }
