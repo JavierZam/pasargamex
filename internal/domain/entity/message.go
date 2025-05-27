@@ -10,6 +10,7 @@ type Message struct {
 	Type          string                 `json:"type" firestore:"type"` // "text", "image", "system", "offer"
 	Metadata      map[string]interface{} `json:"metadata,omitempty" firestore:"metadata,omitempty"`
 	AttachmentURL string                 `json:"attachment_url,omitempty" firestore:"attachmentUrl,omitempty"`
+	ProductID     string                 `json:"product_id,omitempty" firestore:"productId,omitempty"` // New: ProductID associated with the message
 	ReadBy        []string               `json:"read_by" firestore:"readBy"`
 	CreatedAt     time.Time              `json:"created_at" firestore:"createdAt"`
 }

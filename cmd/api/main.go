@@ -93,8 +93,9 @@ func main() {
 	gameTitleUseCase := usecase.NewGameTitleUseCase(gameTitleRepo)
 	productUseCase := usecase.NewProductUseCase(productRepo, gameTitleRepo, userRepo, transactionRepo)
 	reviewUseCase := usecase.NewReviewUseCase(reviewRepo, userRepo)
-	transactionUseCase := usecase.NewTransactionUseCase(transactionRepo, productRepo, userRepo)
-	chatUseCase := usecase.NewChatUseCase(chatRepo, userRepo, productRepo, wsManager) // Pass wsManager to ChatUseCase
+	// New: Pass chatUseCase to TransactionUseCase
+	chatUseCase := usecase.NewChatUseCase(chatRepo, userRepo, productRepo, wsManager)
+	transactionUseCase := usecase.NewTransactionUseCase(transactionRepo, productRepo, userRepo, chatUseCase)
 
 	handler.Setup(authUseCase, userUseCase, gameTitleUseCase, productUseCase, reviewUseCase, transactionUseCase)
 
@@ -110,7 +111,6 @@ func main() {
 	adminMiddleware := apimiddleware.NewAdminMiddleware(userRepo)
 
 	chatHandler := handler.NewChatHandler(chatUseCase)
-	// New: Pass chatUseCase to WebSocketHandler
 	wsHandler := handler.NewWebSocketHandlerWithAuth(wsManager, authClient, chatUseCase)
 
 	e.GET("/health", func(c echo.Context) error {
@@ -150,7 +150,7 @@ func main() {
 
 	router.Setup(e, authMiddleware, adminMiddleware, authClient)
 	router.SetupDevRouter(e, cfg.Environment)
-	router.SetupChatRouter(e, chatHandler, authMiddleware)
+	router.SetupChatRouter(e, chatHandler, authMiddleware, adminMiddleware)
 	router.SetupWebSocketRouter(e, wsHandler)
 
 	log.Printf("Starting server on port %s...", cfg.ServerPort)

@@ -16,4 +16,9 @@ type ChatRepository interface {
 	CreateMessage(ctx context.Context, message *entity.Message) error
 	GetMessagesByChat(ctx context.Context, chatID string, limit, offset int) ([]*entity.Message, int64, error)
 	UpdateMessageReadStatus(ctx context.Context, messageID string, userID string) error
+
+	// New methods for advanced chat features
+	GetChatByTransactionID(ctx context.Context, transactionID string) (*entity.Chat, error) // New
+	GetMessageByID(ctx context.Context, chatID, messageID string) (*entity.Message, error)  // New
+	UpdateMessage(ctx context.Context, chatID string, message *entity.Message) error        // New
 }

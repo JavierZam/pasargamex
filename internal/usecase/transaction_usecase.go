@@ -18,7 +18,6 @@ type FeeCalculator interface {
 type defaultFeeCalculator struct{}
 
 func (fc *defaultFeeCalculator) CalculateFee(amount float64, paymentMethod string) float64 {
-
 	return amount * 0.025
 }
 
@@ -27,18 +26,21 @@ type TransactionUseCase struct {
 	productRepo     repository.ProductRepository
 	userRepo        repository.UserRepository
 	feeCalculator   FeeCalculator
+	chatUseCase     *ChatUseCase
 }
 
 func NewTransactionUseCase(
 	transactionRepo repository.TransactionRepository,
 	productRepo repository.ProductRepository,
 	userRepo repository.UserRepository,
+	chatUseCase *ChatUseCase,
 ) *TransactionUseCase {
 	return &TransactionUseCase{
 		transactionRepo: transactionRepo,
 		productRepo:     productRepo,
 		userRepo:        userRepo,
 		feeCalculator:   &defaultFeeCalculator{},
+		chatUseCase:     chatUseCase,
 	}
 }
 
@@ -49,7 +51,6 @@ type CreateTransactionInput struct {
 }
 
 func (uc *TransactionUseCase) CreateTransaction(ctx context.Context, buyerID string, input CreateTransactionInput) (*entity.Transaction, error) {
-
 	product, err := uc.productRepo.GetByID(ctx, input.ProductID)
 	if err != nil {
 		return nil, err
@@ -87,12 +88,12 @@ func (uc *TransactionUseCase) CreateTransaction(ctx context.Context, buyerID str
 		ProductID:      input.ProductID,
 		SellerID:       product.SellerID,
 		BuyerID:        buyerID,
-		Status:         "pending",
+		Status:         "pending", // Initial status is always pending
 		DeliveryMethod: input.DeliveryMethod,
 		Amount:         product.Price,
 		Fee:            fee,
 		TotalAmount:    totalAmount,
-		PaymentStatus:  "pending",
+		PaymentStatus:  "pending", // Payment status also pending initially
 		SellerReviewed: false,
 		BuyerReviewed:  false,
 		Notes:          input.Notes,
@@ -101,7 +102,6 @@ func (uc *TransactionUseCase) CreateTransaction(ctx context.Context, buyerID str
 	}
 
 	if input.DeliveryMethod == "instant" {
-
 		transaction.Credentials = product.Credentials
 	}
 
@@ -130,7 +130,7 @@ func (uc *TransactionUseCase) GetTransactionByID(ctx context.Context, userID, tr
 		return nil, err
 	}
 
-	if transaction.BuyerID != userID && transaction.SellerID != userID {
+	if transaction.BuyerID != userID && transaction.SellerID != userID && transaction.AdminID != userID { // Allow admin to view
 		return nil, errors.Forbidden("You don't have permission to view this transaction", nil)
 	}
 
@@ -138,9 +138,7 @@ func (uc *TransactionUseCase) GetTransactionByID(ctx context.Context, userID, tr
 }
 
 func (uc *TransactionUseCase) ListTransactions(ctx context.Context, userID, role, status string, page, limit int) ([]interface{}, int64, error) {
-
 	if role != "buyer" && role != "seller" {
-
 		role = "buyer"
 	}
 
@@ -159,8 +157,8 @@ func (uc *TransactionUseCase) ListTransactions(ctx context.Context, userID, role
 	return responses, total, nil
 }
 
+// Modified: ProcessPayment now handles middleman transactions differently
 func (uc *TransactionUseCase) ProcessPayment(ctx context.Context, userID, transactionID, paymentMethod string, paymentDetails map[string]interface{}) (*entity.Transaction, error) {
-
 	transaction, err := uc.transactionRepo.GetByID(ctx, transactionID)
 	if err != nil {
 		return nil, err
@@ -170,28 +168,26 @@ func (uc *TransactionUseCase) ProcessPayment(ctx context.Context, userID, transa
 		return nil, errors.Forbidden("Only buyer can make payment", nil)
 	}
 
-	if transaction.Status != "pending" && transaction.Status != "awaiting_payment" {
-		return nil, errors.BadRequest("Invalid transaction status for payment", nil)
+	if transaction.PaymentStatus == "paid" || transaction.PaymentStatus == "refunded" {
+		return nil, errors.BadRequest("Payment already processed or refunded", nil)
 	}
 
 	transaction.PaymentMethod = paymentMethod
 	transaction.PaymentDetails = paymentDetails
-	transaction.PaymentStatus = "paid"
+	transaction.PaymentStatus = "paid" // Mark payment as initiated/paid by buyer
 
 	now := time.Now()
 	transaction.PaymentAt = &now
 
 	if transaction.DeliveryMethod == "instant" {
-
+		// For instant delivery, payment means completion
 		transaction.Status = "completed"
 		transaction.CompletedAt = &now
-
 	} else if transaction.DeliveryMethod == "middleman" {
-
-		transaction.Status = "processing"
-		transaction.ProcessingAt = &now
-		transaction.MiddlemanStatus = "pending_assignment"
-
+		// For middleman, payment by buyer means awaiting middleman confirmation
+		// Status remains "pending" until middleman confirms funds received
+		transaction.Status = "pending"                              // Explicitly keep as pending
+		transaction.MiddlemanStatus = "awaiting_funds_confirmation" // New status for middleman
 	}
 
 	if err := uc.transactionRepo.Update(ctx, transaction); err != nil {
@@ -200,8 +196,8 @@ func (uc *TransactionUseCase) ProcessPayment(ctx context.Context, userID, transa
 
 	log := &entity.TransactionLog{
 		TransactionID: transaction.ID,
-		Status:        transaction.Status,
-		Notes:         "Payment processed via " + paymentMethod,
+		Status:        transaction.Status, // Log the current status (pending)
+		Notes:         "Payment initiated by buyer via " + paymentMethod,
 		CreatedBy:     userID,
 		CreatedAt:     time.Now(),
 	}
@@ -210,11 +206,62 @@ func (uc *TransactionUseCase) ProcessPayment(ctx context.Context, userID, transa
 		logger.Error("Failed to create payment log for transaction %s: %v", transaction.ID, err)
 	}
 
+	// New: Send system message about payment initiation for middleman transactions
+	if transaction.DeliveryMethod == "middleman" && transaction.MiddlemanChatID != "" {
+		uc.chatUseCase.SendSystemMessage(ctx, transaction.MiddlemanChatID, "Buyer has initiated payment. Awaiting middleman's confirmation of funds received.", "payment_initiated", map[string]interface{}{"transaction_id": transaction.ID, "payment_method": paymentMethod})
+	}
+
+	return transaction, nil
+}
+
+// New: ConfirmMiddlemanPayment confirms that middleman has received funds
+func (uc *TransactionUseCase) ConfirmMiddlemanPayment(ctx context.Context, adminID, transactionID string) (*entity.Transaction, error) {
+	transaction, err := uc.transactionRepo.GetByID(ctx, transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	if transaction.AdminID != adminID {
+		return nil, errors.Forbidden("Only the assigned middleman can confirm payment", nil)
+	}
+
+	if transaction.DeliveryMethod != "middleman" {
+		return nil, errors.BadRequest("Transaction is not a middleman transaction", nil)
+	}
+
+	if transaction.PaymentStatus != "paid" || transaction.Status != "pending" || transaction.MiddlemanStatus != "awaiting_funds_confirmation" {
+		return nil, errors.BadRequest("Transaction is not in the correct state for payment confirmation", nil)
+	}
+
+	transaction.Status = "processing"              // Now it's truly processing
+	transaction.MiddlemanStatus = "funds_received" // Funds confirmed by middleman
+	transaction.UpdatedAt = time.Now()
+
+	if err := uc.transactionRepo.Update(ctx, transaction); err != nil {
+		return nil, err
+	}
+
+	log := &entity.TransactionLog{
+		TransactionID: transaction.ID,
+		Status:        "processing",
+		Notes:         "Middleman confirmed funds received",
+		CreatedBy:     adminID,
+		CreatedAt:     time.Now(),
+	}
+
+	if err := uc.transactionRepo.CreateLog(ctx, log); err != nil {
+		logger.Error("Failed to create middleman payment confirmation log for transaction %s: %v", transaction.ID, err)
+	}
+
+	// Send system message about funds received
+	if transaction.MiddlemanChatID != "" {
+		uc.chatUseCase.SendSystemMessage(ctx, transaction.MiddlemanChatID, "Middleman confirmed funds received. Seller, please provide credentials to Buyer.", "funds_received_confirmed", map[string]interface{}{"transaction_id": transaction.ID})
+	}
+
 	return transaction, nil
 }
 
 func (uc *TransactionUseCase) AssignMiddleman(ctx context.Context, adminID, transactionID string) (*entity.Transaction, error) {
-
 	transaction, err := uc.transactionRepo.GetByID(ctx, transactionID)
 	if err != nil {
 		return nil, err
@@ -224,12 +271,12 @@ func (uc *TransactionUseCase) AssignMiddleman(ctx context.Context, adminID, tran
 		return nil, errors.BadRequest("Transaction is not using middleman delivery method", nil)
 	}
 
-	if transaction.Status != "processing" || transaction.MiddlemanStatus != "pending_assignment" {
-		return nil, errors.BadRequest("Transaction is not ready for middleman assignment", nil)
+	if transaction.Status != "pending" || transaction.MiddlemanStatus != "" { // Middleman can be assigned when transaction is pending and no middleman yet
+		return nil, errors.BadRequest("Transaction is not ready for middleman assignment. Status must be 'pending' and no middleman assigned yet.", nil)
 	}
 
 	transaction.AdminID = adminID
-	transaction.MiddlemanStatus = "assigned"
+	transaction.MiddlemanStatus = "assigned" // Mark as assigned
 	transaction.UpdatedAt = time.Now()
 
 	if err := uc.transactionRepo.Update(ctx, transaction); err != nil {
@@ -238,7 +285,7 @@ func (uc *TransactionUseCase) AssignMiddleman(ctx context.Context, adminID, tran
 
 	log := &entity.TransactionLog{
 		TransactionID: transaction.ID,
-		Status:        transaction.Status,
+		Status:        transaction.Status, // Log the current status (pending)
 		Notes:         "Middleman assigned",
 		CreatedBy:     adminID,
 		CreatedAt:     time.Now(),
@@ -248,11 +295,33 @@ func (uc *TransactionUseCase) AssignMiddleman(ctx context.Context, adminID, tran
 		logger.Error("Failed to create middleman assignment log for transaction %s: %v", transaction.ID, err)
 	}
 
+	// Create the middleman chat room here
+	middlemanChat, err := uc.chatUseCase.CreateMiddlemanChat(ctx, CreateMiddlemanChatInput{
+		BuyerID:        transaction.BuyerID,
+		SellerID:       transaction.SellerID,
+		MiddlemanID:    adminID, // The assigned admin is the middleman
+		ProductID:      transaction.ProductID,
+		TransactionID:  transaction.ID,
+		InitialMessage: "Welcome to your secure transaction chat! I'm your middleman. Please follow my instructions to complete the transaction.",
+	})
+	if err != nil {
+		logger.Error("Failed to create middleman chat for transaction %s: %v", transaction.ID, err)
+	} else {
+		transaction.MiddlemanChatID = middlemanChat.Chat.ID
+		if err := uc.transactionRepo.Update(ctx, transaction); err != nil {
+			logger.Error("Failed to update transaction %s with middleman chat ID: %v", transaction.ID, err)
+		}
+	}
+
+	// Send system message about middleman assignment
+	if transaction.MiddlemanChatID != "" {
+		uc.chatUseCase.SendSystemMessage(ctx, transaction.MiddlemanChatID, "Middleman assigned. Buyer, please initiate payment to the middleman.", "middleman_assigned", map[string]interface{}{"transaction_id": transaction.ID, "middleman_id": adminID})
+	}
+
 	return transaction, nil
 }
 
 func (uc *TransactionUseCase) VerifyAndCompleteMiddleman(ctx context.Context, adminID, transactionID string, credentials map[string]interface{}) (*entity.Transaction, error) {
-
 	transaction, err := uc.transactionRepo.GetByID(ctx, transactionID)
 	if err != nil {
 		return nil, err
@@ -262,8 +331,8 @@ func (uc *TransactionUseCase) VerifyAndCompleteMiddleman(ctx context.Context, ad
 		return nil, errors.Forbidden("Only assigned admin can complete this transaction", nil)
 	}
 
-	if transaction.Status != "processing" || transaction.MiddlemanStatus != "assigned" {
-		return nil, errors.BadRequest("Transaction is not ready for completion", nil)
+	if transaction.Status != "processing" || transaction.MiddlemanStatus != "funds_received" { // Ensure funds are confirmed
+		return nil, errors.BadRequest("Transaction is not ready for completion. Funds must be confirmed by middleman.", nil)
 	}
 
 	transaction.Status = "completed"
@@ -290,11 +359,14 @@ func (uc *TransactionUseCase) VerifyAndCompleteMiddleman(ctx context.Context, ad
 		logger.Error("Failed to create middleman completion log for transaction %s: %v", transaction.ID, err)
 	}
 
+	if transaction.DeliveryMethod == "middleman" && transaction.MiddlemanChatID != "" {
+		uc.chatUseCase.SendSystemMessage(ctx, transaction.MiddlemanChatID, "Transaction completed successfully! Funds released to seller.", "transaction_completed", map[string]interface{}{"transaction_id": transaction.ID})
+	}
+
 	return transaction, nil
 }
 
 func (uc *TransactionUseCase) GetTransactionLogs(ctx context.Context, userID, transactionID string) ([]*entity.TransactionLog, error) {
-
 	_, err := uc.GetTransactionByID(ctx, userID, transactionID)
 	if err != nil {
 		return nil, err
@@ -371,6 +443,10 @@ func (uc *TransactionUseCase) CancelTransaction(ctx context.Context, userID, tra
 		logger.Error("Failed to create cancellation log for transaction %s: %v", transaction.ID, err)
 	}
 
+	if transaction.DeliveryMethod == "middleman" && transaction.MiddlemanChatID != "" {
+		uc.chatUseCase.SendSystemMessage(ctx, transaction.MiddlemanChatID, "Transaction cancelled. Reason: "+reason, "transaction_cancelled", map[string]interface{}{"transaction_id": transaction.ID, "reason": reason})
+	}
+
 	return transaction, nil
 }
 
@@ -425,6 +501,10 @@ func (uc *TransactionUseCase) CreateDispute(ctx context.Context, userID, transac
 		logger.Error("Failed to create dispute log for transaction %s: %v", transaction.ID, err)
 	}
 
+	if transaction.DeliveryMethod == "middleman" && transaction.MiddlemanChatID != "" {
+		uc.chatUseCase.SendSystemMessage(ctx, transaction.MiddlemanChatID, "Transaction disputed. Reason: "+reason, "transaction_disputed", map[string]interface{}{"transaction_id": transaction.ID, "reason": reason})
+	}
+
 	return transaction, nil
 }
 
@@ -442,14 +522,12 @@ func (uc *TransactionUseCase) ResolveDispute(ctx context.Context, adminID, trans
 	now := time.Now()
 
 	if refund {
-
 		newStatus = "cancelled"
 		transaction.Status = newStatus
 		transaction.CancelledAt = &now
 		transaction.PaymentStatus = "refunded"
 		transaction.RefundedAt = &now
 	} else {
-
 		newStatus = "completed"
 		transaction.Status = newStatus
 		transaction.CompletedAt = &now
@@ -471,6 +549,10 @@ func (uc *TransactionUseCase) ResolveDispute(ctx context.Context, adminID, trans
 
 	if err := uc.transactionRepo.CreateLog(ctx, log); err != nil {
 		logger.Error("Failed to create dispute resolution log for transaction %s: %v", transaction.ID, err)
+	}
+
+	if transaction.DeliveryMethod == "middleman" && transaction.MiddlemanChatID != "" {
+		uc.chatUseCase.SendSystemMessage(ctx, transaction.MiddlemanChatID, "Dispute resolved by middleman. Status: "+newStatus, "dispute_resolved", map[string]interface{}{"transaction_id": transaction.ID, "resolution": resolution, "refund": refund})
 	}
 
 	return transaction, nil
@@ -511,23 +593,26 @@ func (uc *TransactionUseCase) ConfirmDelivery(ctx context.Context, buyerID, tran
 		logger.Error("Failed to create delivery confirmation log for transaction %s: %v", transaction.ID, err)
 	}
 
+	if transaction.DeliveryMethod == "middleman" && transaction.MiddlemanChatID != "" {
+		uc.chatUseCase.SendSystemMessage(ctx, transaction.MiddlemanChatID, "Delivery confirmed by buyer. Transaction completed.", "delivery_confirmed", map[string]interface{}{"transaction_id": transaction.ID})
+	}
+
 	return transaction, nil
 }
 
 func (uc *TransactionUseCase) isValidStatusTransition(currentStatus, newStatus, deliveryMethod string, isBuyer, isSeller bool) bool {
-
 	validTransitions := map[string]map[string]struct {
 		allowed bool
 		roles   []string
 	}{
 		"pending": {
-			"awaiting_payment": {true, []string{"buyer"}},
+			"awaiting_payment": {true, []string{"buyer"}}, // Buyer initiates payment for instant
 			"cancelled":        {true, []string{"buyer", "seller"}},
+			// New: For middleman, payment confirmation moves it to processing
 		},
-		"awaiting_payment": {
-			"processing": {true, []string{"system", "admin"}},
-			"completed":  {true, []string{"system", "admin"}},
-			"cancelled":  {true, []string{"buyer", "seller", "admin"}},
+		"awaiting_middleman_payment_confirmation": { // New status for middleman flow
+			"processing": {true, []string{"admin"}}, // Only admin (middleman) can move to processing
+			"cancelled":  {true, []string{"admin"}},
 		},
 		"processing": {
 			"completed": {true, []string{"admin", "buyer"}},
@@ -539,12 +624,16 @@ func (uc *TransactionUseCase) isValidStatusTransition(currentStatus, newStatus, 
 			"cancelled": {true, []string{"admin"}},
 		},
 	}
-	if deliveryMethod == "instant" && currentStatus == "awaiting_payment" && newStatus == "completed" {
+	// Special case for instant delivery payment directly to completed
+	if deliveryMethod == "instant" && currentStatus == "pending" && newStatus == "completed" {
+		return true
+	}
+	// Special case for middleman payment initiated by buyer
+	if deliveryMethod == "middleman" && currentStatus == "pending" && newStatus == "awaiting_funds_confirmation" { // This is not a status change, but internal flag
 		return true
 	}
 
 	if transition, exists := validTransitions[currentStatus][newStatus]; exists {
-
 		for _, role := range transition.roles {
 			if (role == "buyer" && isBuyer) || (role == "seller" && isSeller) || role == "system" || role == "admin" {
 				return true
@@ -556,7 +645,6 @@ func (uc *TransactionUseCase) isValidStatusTransition(currentStatus, newStatus, 
 }
 
 func (uc *TransactionUseCase) ListAdminTransactions(ctx context.Context, adminID string, filter map[string]interface{}, page, limit int) ([]*entity.Transaction, int64, error) {
-
 	user, err := uc.userRepo.GetByID(ctx, adminID)
 	if err != nil {
 		return nil, 0, errors.NotFound("Admin user", err)
@@ -577,7 +665,6 @@ func (uc *TransactionUseCase) ListAdminTransactions(ctx context.Context, adminID
 }
 
 func (uc *TransactionUseCase) ListPendingMiddlemanTransactions(ctx context.Context, adminID string, page, limit int) ([]*entity.Transaction, int64, error) {
-
 	user, err := uc.userRepo.GetByID(ctx, adminID)
 	if err != nil {
 		return nil, 0, errors.NotFound("Admin user", err)
@@ -598,7 +685,6 @@ func (uc *TransactionUseCase) ListPendingMiddlemanTransactions(ctx context.Conte
 }
 
 func (uc *TransactionUseCase) prepareTransactionResponse(transaction *entity.Transaction, userID string) interface{} {
-
 	type TransactionResponse struct {
 		ID              string                 `json:"id"`
 		ProductID       string                 `json:"product_id"`
@@ -615,6 +701,7 @@ func (uc *TransactionUseCase) prepareTransactionResponse(transaction *entity.Tra
 		AdminID         string                 `json:"admin_id,omitempty"`
 		MiddlemanStatus string                 `json:"middleman_status,omitempty"`
 		Notes           string                 `json:"notes,omitempty"`
+		MiddlemanChatID string                 `json:"middleman_chat_id,omitempty"` // New: Middleman Chat ID
 
 		Credentials map[string]interface{} `json:"credentials,omitempty"`
 	}
@@ -635,10 +722,11 @@ func (uc *TransactionUseCase) prepareTransactionResponse(transaction *entity.Tra
 		AdminID:         transaction.AdminID,
 		MiddlemanStatus: transaction.MiddlemanStatus,
 		Notes:           transaction.Notes,
+		MiddlemanChatID: transaction.MiddlemanChatID, // Assign new field
 	}
 
 	if (transaction.SellerID == userID) ||
-		(transaction.BuyerID == userID && transaction.PaymentStatus == "paid") {
+		(transaction.BuyerID == userID && transaction.PaymentStatus == "paid") { // Credentials visible to buyer only after payment is "paid" (initiated)
 		response.Credentials = transaction.Credentials
 	}
 

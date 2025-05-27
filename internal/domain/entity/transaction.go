@@ -22,6 +22,7 @@ type Transaction struct {
 
 	AdminID         string `json:"admin_id,omitempty" firestore:"adminId,omitempty"`
 	MiddlemanStatus string `json:"middleman_status,omitempty" firestore:"middlemanStatus,omitempty"`
+	MiddlemanChatID string `json:"middleman_chat_id,omitempty" firestore:"middlemanChatId,omitempty"` // New: Chat ID for middleman transaction
 
 	SellerReviewed bool `json:"seller_reviewed" firestore:"sellerReviewed"`
 	BuyerReviewed  bool `json:"buyer_reviewed" firestore:"buyerReviewed"`

@@ -39,10 +39,24 @@ type CreateChatInput struct {
 	InitialMessage string
 }
 
+// Updated: Added ProductID, AttachmentURL, Metadata to SendMessageInput
 type SendMessageInput struct {
-	ChatID  string
-	Content string
-	Type    string // "text", "image", "system", "offer"
+	ChatID        string
+	Content       string
+	Type          string                 // "text", "image", "system", "offer"
+	AttachmentURL string                 // For image/file sharing
+	Metadata      map[string]interface{} // For offer details, system message data etc.
+	ProductID     string                 // ProductID associated with this specific message
+}
+
+// New: Input for creating a middleman chat
+type CreateMiddlemanChatInput struct {
+	BuyerID        string
+	SellerID       string
+	MiddlemanID    string
+	ProductID      string
+	TransactionID  string
+	InitialMessage string
 }
 
 type ChatResponse struct {
@@ -76,8 +90,6 @@ func (uc *ChatUseCase) CreateChat(ctx context.Context, userID string, input Crea
 
 	existingChat, err := uc.findExistingChat(ctx, userID, input.RecipientID)
 	if err == nil && existingChat != nil {
-		log.Printf("CreateChat: Found existing chat %s between users %s and %s. Reusing this chat.",
-			existingChat.ID, userID, input.RecipientID)
 		chatToReturn = existingChat
 	} else {
 		if err != nil && !errors.Is(err, "NOT_FOUND") {
@@ -87,7 +99,7 @@ func (uc *ChatUseCase) CreateChat(ctx context.Context, userID string, input Crea
 
 		newChat := &entity.Chat{
 			Participants:  []string{userID, input.RecipientID},
-			ProductID:     input.ProductID,
+			ProductID:     input.ProductID, // Initial product context for the chat
 			Type:          "direct",
 			UnreadCount:   make(map[string]int),
 			LastMessageAt: time.Now(),
@@ -98,14 +110,14 @@ func (uc *ChatUseCase) CreateChat(ctx context.Context, userID string, input Crea
 			return nil, err
 		}
 		chatToReturn = newChat
-		log.Printf("CreateChat: Successfully created new chat %s", chatToReturn.ID)
 	}
 
 	if input.InitialMessage != "" {
 		messageResp, err := uc.SendMessage(ctx, userID, SendMessageInput{
-			ChatID:  chatToReturn.ID,
-			Content: input.InitialMessage,
-			Type:    "text",
+			ChatID:    chatToReturn.ID,
+			Content:   input.InitialMessage,
+			Type:      "text",
+			ProductID: input.ProductID, // Pass ProductID to the initial message
 		})
 		if err != nil {
 			log.Printf("CreateChat Error: Failed to send initial message for chat %s: %v", chatToReturn.ID, err)
@@ -126,13 +138,71 @@ func (uc *ChatUseCase) CreateChat(ctx context.Context, userID string, input Crea
 		if err := uc.chatRepo.Update(ctx, chatToReturn); err != nil {
 			log.Printf("CreateChat Error: Failed to update chat %s with last message after initial message: %v", chatToReturn.ID, err)
 		}
-		log.Printf("CreateChat: Successfully sent initial message to chat %s", chatToReturn.ID)
 	}
 
 	return &ChatResponse{
 		Chat:      chatToReturn,
 		Product:   product,
 		OtherUser: recipient,
+	}, nil
+}
+
+// New: CreateMiddlemanChat creates a group chat for a transaction involving a middleman
+func (uc *ChatUseCase) CreateMiddlemanChat(ctx context.Context, input CreateMiddlemanChatInput) (*ChatResponse, error) {
+	// Validate participants exist (removed unused variable assignments)
+	if _, err := uc.userRepo.GetByID(ctx, input.BuyerID); err != nil {
+		return nil, errors.NotFound("Buyer not found", err)
+	}
+	if _, err := uc.userRepo.GetByID(ctx, input.SellerID); err != nil {
+		return nil, errors.NotFound("Seller not found", err)
+	}
+	if _, err := uc.userRepo.GetByID(ctx, input.MiddlemanID); err != nil {
+		return nil, errors.NotFound("Middleman not found", err)
+	}
+
+	// Check if a middleman chat for this transaction already exists
+	// For simplicity, we assume one middleman chat per transaction
+	existingChat, err := uc.chatRepo.GetChatByTransactionID(ctx, input.TransactionID)
+	if err == nil && existingChat != nil {
+		log.Printf("CreateMiddlemanChat: Found existing middleman chat %s for transaction %s. Reusing it.", existingChat.ID, input.TransactionID)
+		return &ChatResponse{Chat: existingChat}, nil
+	}
+	if err != nil && !errors.Is(err, "NOT_FOUND") {
+		return nil, err // Propagate actual error
+	}
+
+	// Create new middleman chat
+	chat := &entity.Chat{
+		Participants:  []string{input.BuyerID, input.SellerID, input.MiddlemanID},
+		ProductID:     input.ProductID,
+		TransactionID: input.TransactionID,
+		Type:          "middleman", // Set type to "middleman"
+		UnreadCount:   make(map[string]int),
+		LastMessageAt: time.Now(),
+	}
+
+	if err := uc.chatRepo.Create(ctx, chat); err != nil {
+		return nil, err
+	}
+
+	// Send initial system message to the middleman chat
+	if input.InitialMessage != "" {
+		_, err := uc.SendSystemMessage(ctx, chat.ID, input.InitialMessage, "transaction_init", nil)
+		if err != nil {
+			log.Printf("CreateMiddlemanChat: Failed to send initial system message for chat %s: %v", chat.ID, err)
+			// Don't return error, chat is already created
+		}
+		chat.LastMessage = input.InitialMessage
+		chat.LastMessageAt = time.Now() // Update last message time for system message
+		if err := uc.chatRepo.Update(ctx, chat); err != nil {
+			log.Printf("CreateMiddlemanChat: Failed to update chat %s with last system message: %v", chat.ID, err)
+		}
+	}
+
+	return &ChatResponse{
+		Chat:      chat,
+		Product:   nil, // Product info might be fetched separately if needed for response
+		OtherUser: nil, // No single "other user" in group chat context
 	}, nil
 }
 
@@ -163,6 +233,7 @@ func containsString(slice []string, item string) bool {
 	return false
 }
 
+// Updated: SendMessage now accepts ProductID, AttachmentURL, and Metadata
 func (uc *ChatUseCase) SendMessage(ctx context.Context, userID string, input SendMessageInput) (*MessageResponse, error) {
 	chat, err := uc.chatRepo.GetByID(ctx, input.ChatID)
 	if err != nil {
@@ -182,12 +253,15 @@ func (uc *ChatUseCase) SendMessage(ctx context.Context, userID string, input Sen
 	}
 
 	message := &entity.Message{
-		ChatID:    input.ChatID,
-		SenderID:  userID,
-		Content:   input.Content,
-		Type:      input.Type,
-		ReadBy:    []string{userID},
-		CreatedAt: time.Now(),
+		ChatID:        input.ChatID,
+		SenderID:      userID,
+		Content:       input.Content,
+		Type:          input.Type,
+		AttachmentURL: input.AttachmentURL, // New: Save attachment URL
+		Metadata:      input.Metadata,      // New: Save metadata
+		ProductID:     input.ProductID,     // Save ProductID in the message
+		ReadBy:        []string{userID},
+		CreatedAt:     time.Now(),
 	}
 
 	if err := uc.chatRepo.CreateMessage(ctx, message); err != nil {
@@ -195,22 +269,24 @@ func (uc *ChatUseCase) SendMessage(ctx context.Context, userID string, input Sen
 		return nil, err
 	}
 
-	chat.LastMessage = input.Content
-	chat.LastMessageAt = message.CreatedAt
-
-	if chat.UnreadCount == nil {
-		chat.UnreadCount = make(map[string]int)
-	}
-
-	for _, participantID := range chat.Participants {
-		if participantID != userID {
-			chat.UnreadCount[participantID]++
+	// Update chat's last message info (only for text/offer/image messages, not system messages)
+	if message.Type != "system" {
+		chat.LastMessage = input.Content
+		chat.LastMessageAt = message.CreatedAt
+		if chat.UnreadCount == nil {
+			chat.UnreadCount = make(map[string]int)
 		}
-	}
 
-	if err := uc.chatRepo.Update(ctx, chat); err != nil {
-		log.Printf("SendMessage Error: Failed to update chat %s with last message: %v", chat.ID, err)
-		return nil, err
+		for _, participantID := range chat.Participants {
+			if participantID != userID {
+				chat.UnreadCount[participantID]++
+			}
+		}
+
+		if err := uc.chatRepo.Update(ctx, chat); err != nil {
+			log.Printf("SendMessage Error: Failed to update chat %s with last message: %v", chat.ID, err)
+			return nil, err
+		}
 	}
 
 	notification := map[string]interface{}{
@@ -231,6 +307,186 @@ func (uc *ChatUseCase) SendMessage(ctx context.Context, userID string, input Sen
 		Message: message,
 		Sender:  sender,
 	}, nil
+}
+
+// New: SendSystemMessage sends a system-generated message to a chat
+func (uc *ChatUseCase) SendSystemMessage(ctx context.Context, chatID, content, systemType string, metadata map[string]interface{}) (*MessageResponse, error) {
+	// System messages are sent by "system" (no specific user ID)
+	// You might want a dedicated "system" user ID or just leave SenderID empty/null
+	// For now, we'll use a placeholder "system" ID or an empty string.
+	systemUserID := "system" // Or a specific admin ID if system messages are sent by an admin
+
+	message := &entity.Message{
+		ChatID:    chatID,
+		SenderID:  systemUserID, // Sender is "system"
+		Content:   content,
+		Type:      "system", // Type is "system"
+		Metadata:  metadata,
+		ReadBy:    []string{}, // System messages are not "read" by users in the same way
+		CreatedAt: time.Now(),
+	}
+
+	if err := uc.chatRepo.CreateMessage(ctx, message); err != nil {
+		log.Printf("SendSystemMessage Error: Failed to create system message for chat %s: %v", chatID, err)
+		return nil, err
+	}
+
+	// Update chat's last message info for system messages
+	chat, err := uc.chatRepo.GetByID(ctx, chatID)
+	if err != nil {
+		log.Printf("SendSystemMessage Error: Chat %s not found for system message: %v", chatID, err)
+		return nil, err
+	}
+	chat.LastMessage = content
+	chat.LastMessageAt = message.CreatedAt
+	if err := uc.chatRepo.Update(ctx, chat); err != nil {
+		log.Printf("SendSystemMessage Error: Failed to update chat %s with last system message: %v", chat.ID, err)
+	}
+
+	// Notify all participants about the new system message
+	notification := map[string]interface{}{
+		"type":    "new_message",
+		"chat_id": chatID,
+		"message": message,
+		"sender":  map[string]string{"id": systemUserID, "username": "System"}, // Placeholder sender info
+	}
+	notificationJSON, _ := json.Marshal(notification)
+	for _, participantID := range chat.Participants {
+		uc.wsManager.SendToUser(participantID, notificationJSON)
+	}
+
+	return &MessageResponse{Message: message}, nil
+}
+
+// New: AcceptOffer updates the status of an offer message
+func (uc *ChatUseCase) AcceptOffer(ctx context.Context, chatID, messageID, userID string) error {
+	// 1. Get the message
+	message, err := uc.chatRepo.GetMessageByID(ctx, chatID, messageID) // Assuming GetMessageByID exists or will be added
+	if err != nil {
+		return errors.NotFound("Offer message not found", err)
+	}
+
+	// 2. Validate it's an offer message
+	if message.Type != "offer" {
+		return errors.BadRequest("Message is not an offer", nil)
+	}
+
+	// 3. Check current offer status
+	if status, ok := message.Metadata["status"].(string); ok && status != "pending" {
+		return errors.BadRequest("Offer is not pending", nil)
+	}
+
+	// 4. Check if the user is the recipient of the offer (not the sender)
+	// This logic depends on how you define offer sender/recipient.
+	// For now, let's assume the other participant in a direct chat can accept.
+	chat, err := uc.chatRepo.GetByID(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	isRecipient := false
+	for _, p := range chat.Participants {
+		if p != message.SenderID && p == userID { // If current user is a participant but not the sender
+			isRecipient = true
+			break
+		}
+	}
+	if !isRecipient {
+		return errors.Forbidden("Only the offer recipient can accept/reject", nil)
+	}
+
+	// 5. Update offer status to "accepted"
+	if message.Metadata == nil {
+		message.Metadata = make(map[string]interface{})
+	}
+	message.Metadata["status"] = "accepted"
+	message.Metadata["accepted_by"] = userID
+	message.Metadata["accepted_at"] = time.Now()
+
+	if err := uc.chatRepo.UpdateMessage(ctx, chatID, message); err != nil { // Assuming UpdateMessage exists or will be added
+		return errors.Internal("Failed to accept offer", err)
+	}
+
+	// 6. Send a system message to the chat about the accepted offer
+	acceptedByUsername := ""
+	if user, uErr := uc.userRepo.GetByID(ctx, userID); uErr == nil {
+		acceptedByUsername = user.Username
+	}
+	uc.SendSystemMessage(ctx, chatID, acceptedByUsername+" accepted the offer.", "offer_accepted", message.Metadata)
+
+	// 7. Notify participants via WebSocket
+	notification := map[string]interface{}{
+		"type":        "offer_update",
+		"chat_id":     chatID,
+		"message_id":  messageID,
+		"status":      "accepted",
+		"accepted_by": userID,
+		"metadata":    message.Metadata,
+	}
+	notificationJSON, _ := json.Marshal(notification)
+	uc.wsManager.SendToChatRoom(chatID, notificationJSON, "") // Send to all in room
+
+	return nil
+}
+
+// New: RejectOffer updates the status of an offer message to rejected
+func (uc *ChatUseCase) RejectOffer(ctx context.Context, chatID, messageID, userID string) error {
+	message, err := uc.chatRepo.GetMessageByID(ctx, chatID, messageID)
+	if err != nil {
+		return errors.NotFound("Offer message not found", err)
+	}
+
+	if message.Type != "offer" {
+		return errors.BadRequest("Message is not an offer", nil)
+	}
+
+	if status, ok := message.Metadata["status"].(string); ok && status != "pending" {
+		return errors.BadRequest("Offer is not pending", nil)
+	}
+
+	chat, err := uc.chatRepo.GetByID(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	isRecipient := false
+	for _, p := range chat.Participants {
+		if p != message.SenderID && p == userID {
+			isRecipient = true
+			break
+		}
+	}
+	if !isRecipient {
+		return errors.Forbidden("Only the offer recipient can accept/reject", nil)
+	}
+
+	if message.Metadata == nil {
+		message.Metadata = make(map[string]interface{})
+	}
+	message.Metadata["status"] = "rejected"
+	message.Metadata["rejected_by"] = userID
+	message.Metadata["rejected_at"] = time.Now()
+
+	if err := uc.chatRepo.UpdateMessage(ctx, chatID, message); err != nil {
+		return errors.Internal("Failed to reject offer", err)
+	}
+
+	rejectedByUsername := ""
+	if user, uErr := uc.userRepo.GetByID(ctx, userID); uErr == nil {
+		rejectedByUsername = user.Username
+	}
+	uc.SendSystemMessage(ctx, chatID, rejectedByUsername+" rejected the offer.", "offer_rejected", message.Metadata)
+
+	notification := map[string]interface{}{
+		"type":        "offer_update",
+		"chat_id":     chatID,
+		"message_id":  messageID,
+		"status":      "rejected",
+		"rejected_by": userID,
+		"metadata":    message.Metadata,
+	}
+	notificationJSON, _ := json.Marshal(notification)
+	uc.wsManager.SendToChatRoom(chatID, notificationJSON, "")
+
+	return nil
 }
 
 func (uc *ChatUseCase) GetUserChats(ctx context.Context, userID string, limit, offset int) ([]*ChatResponse, int64, error) {
@@ -380,9 +636,7 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
-// New: HandleTypingEvent broadcasts typing status to chat room participants
 func (uc *ChatUseCase) HandleTypingEvent(ctx context.Context, userID, chatID string, isTyping bool) {
-	// Get chat to ensure user is a participant
 	chat, err := uc.chatRepo.GetByID(ctx, chatID)
 	if err != nil {
 		log.Printf("HandleTypingEvent Error: Chat %s not found: %v", chatID, err)
@@ -393,7 +647,6 @@ func (uc *ChatUseCase) HandleTypingEvent(ctx context.Context, userID, chatID str
 		return
 	}
 
-	// Get sender info to include in notification
 	sender, err := uc.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		log.Printf("HandleTypingEvent Error: Sender %s not found: %v", userID, err)
@@ -409,12 +662,10 @@ func (uc *ChatUseCase) HandleTypingEvent(ctx context.Context, userID, chatID str
 	}
 
 	notificationJSON, _ := json.Marshal(notification)
-	uc.wsManager.SendToChatRoom(chatID, notificationJSON, userID) // Send to all in room except sender
+	uc.wsManager.SendToChatRoom(chatID, notificationJSON, userID)
 }
 
-// New: MarkMessageAsRead marks a specific message as read and notifies sender
 func (uc *ChatUseCase) MarkMessageAsRead(ctx context.Context, chatID, messageID, userID string) {
-	// Ensure user is participant of chat
 	chat, err := uc.chatRepo.GetByID(ctx, chatID)
 	if err != nil {
 		log.Printf("MarkMessageAsRead Error: Chat %s not found: %v", chatID, err)
@@ -425,14 +676,12 @@ func (uc *ChatUseCase) MarkMessageAsRead(ctx context.Context, chatID, messageID,
 		return
 	}
 
-	// Mark message as read in repository
 	err = uc.chatRepo.UpdateMessageReadStatus(ctx, messageID, userID)
 	if err != nil {
 		log.Printf("MarkMessageAsRead Error: Failed to update message %s read status for user %s: %v", messageID, userID, err)
 		return
 	}
 
-	// Notify other participants (especially sender) about read receipt
 	notification := map[string]interface{}{
 		"type":       "message_read_receipt",
 		"chat_id":    chatID,
@@ -440,15 +689,10 @@ func (uc *ChatUseCase) MarkMessageAsRead(ctx context.Context, chatID, messageID,
 		"reader_id":  userID,
 	}
 	notificationJSON, _ := json.Marshal(notification)
-	uc.wsManager.SendToChatRoom(chatID, notificationJSON, userID) // Send to all in room except reader (usually sender)
-
-	// Optionally, update unread count for the chat itself (though MarkChatAsRead handles full chat)
-	// This might be for single message read receipts
+	uc.wsManager.SendToChatRoom(chatID, notificationJSON, userID)
 }
 
-// New: HandleUserPresence updates and broadcasts user's presence in a chat room
 func (uc *ChatUseCase) HandleUserPresence(ctx context.Context, userID, chatID string, isOnline bool) {
-	// Get chat to ensure user is a participant
 	chat, err := uc.chatRepo.GetByID(ctx, chatID)
 	if err != nil {
 		log.Printf("HandleUserPresence Error: Chat %s not found: %v", chatID, err)
@@ -459,7 +703,6 @@ func (uc *ChatUseCase) HandleUserPresence(ctx context.Context, userID, chatID st
 		return
 	}
 
-	// Get user info
 	user, err := uc.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		log.Printf("HandleUserPresence Error: User %s not found: %v", userID, err)
@@ -475,5 +718,5 @@ func (uc *ChatUseCase) HandleUserPresence(ctx context.Context, userID, chatID st
 	}
 
 	notificationJSON, _ := json.Marshal(notification)
-	uc.wsManager.SendToChatRoom(chatID, notificationJSON, userID) // Send to all in room except the user whose presence is updated
+	uc.wsManager.SendToChatRoom(chatID, notificationJSON, userID)
 }

@@ -2,7 +2,7 @@ package repository
 
 import (
 	"context"
-	"log" // Tetap impor untuk error logging
+	"log"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -58,12 +58,38 @@ func (r *firestoreChatRepository) CreateMessage(ctx context.Context, message *en
 	return nil
 }
 
+// New: GetMessageByID retrieves a specific message by its ID within a chat
+func (r *firestoreChatRepository) GetMessageByID(ctx context.Context, chatID, messageID string) (*entity.Message, error) {
+	doc, err := r.client.Collection("chats").Doc(chatID).Collection("messages").Doc(messageID).Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil, errors.NotFound("Message", err)
+		}
+		return nil, errors.Internal("Failed to get message", err)
+	}
+
+	var message entity.Message
+	if err := doc.DataTo(&message); err != nil {
+		return nil, errors.Internal("Failed to parse message data", err)
+	}
+	return &message, nil
+}
+
+// New: UpdateMessage updates an existing message (e.g., for offer status)
+func (r *firestoreChatRepository) UpdateMessage(ctx context.Context, chatID string, message *entity.Message) error {
+	_, err := r.client.Collection("chats").Doc(chatID).Collection("messages").Doc(message.ID).Set(ctx, message)
+	if err != nil {
+		return errors.Internal("Failed to update message", err)
+	}
+	return nil
+}
+
 func (r *firestoreChatRepository) GetMessagesByChat(ctx context.Context, chatID string, limit, offset int) ([]*entity.Message, int64, error) {
 	query := r.client.Collection("chats").Doc(chatID).Collection("messages").OrderBy("createdAt", firestore.Desc)
 
 	countDocs, err := query.Documents(ctx).GetAll()
 	if err != nil {
-		log.Printf("Firestore error while counting messages for chat %s: %v", chatID, err) // Keep for debugging index issues
+		log.Printf("Firestore error while counting messages for chat %s: %v", chatID, err)
 		return nil, 0, errors.Internal("Failed to count messages for chat", err)
 	}
 	total := int64(len(countDocs))
@@ -84,13 +110,13 @@ func (r *firestoreChatRepository) GetMessagesByChat(ctx context.Context, chatID 
 			break
 		}
 		if err != nil {
-			log.Printf("Firestore error while iterating messages for chat %s: %v", chatID, err) // Keep for debugging
+			log.Printf("Firestore error while iterating messages for chat %s: %v", chatID, err)
 			return nil, 0, errors.Internal("Failed to iterate messages", err)
 		}
 
 		var message entity.Message
 		if err := doc.DataTo(&message); err != nil {
-			log.Printf("Error parsing message data for chat %s: %v", chatID, err) // Keep for debugging
+			log.Printf("Error parsing message data for chat %s: %v", chatID, err)
 			return nil, 0, errors.Internal("Failed to parse message data", err)
 		}
 
@@ -101,6 +127,11 @@ func (r *firestoreChatRepository) GetMessagesByChat(ctx context.Context, chatID 
 }
 
 func (r *firestoreChatRepository) UpdateMessageReadStatus(ctx context.Context, messageID string, userID string) error {
+	// To update read status, we need to find the message first.
+	// This approach uses CollectionGroup which requires an index for 'id' field.
+	// Alternatively, if chatID is passed along with messageID, we can directly access the subcollection.
+	// For now, let's assume messageID is unique enough to find the message across chats.
+	// If performance is an issue, consider passing chatID to this method.
 	iter := r.client.CollectionGroup("messages").Where("id", "==", messageID).Limit(1).Documents(ctx)
 	doc, err := iter.Next()
 
@@ -116,15 +147,18 @@ func (r *firestoreChatRepository) UpdateMessageReadStatus(ctx context.Context, m
 		return errors.Internal("Failed to parse message data", err)
 	}
 
+	// Check if user already marked as read
 	for _, reader := range message.ReadBy {
 		if reader == userID {
-			return nil
+			return nil // Already marked as read
 		}
 	}
 
+	// Add user to read list
 	message.ReadBy = append(message.ReadBy, userID)
 
-	_, err = doc.Ref.Set(ctx, message)
+	// Update the message
+	_, err = doc.Ref.Set(ctx, message) // Use doc.Ref.Set to update the specific message
 	if err != nil {
 		return errors.Internal("Failed to update message read status", err)
 	}
@@ -149,12 +183,33 @@ func (r *firestoreChatRepository) GetByID(ctx context.Context, id string) (*enti
 	return &chat, nil
 }
 
+// New: GetChatByTransactionID retrieves a chat by its associated transaction ID
+func (r *firestoreChatRepository) GetChatByTransactionID(ctx context.Context, transactionID string) (*entity.Chat, error) {
+	query := r.client.Collection("chats").Where("transactionId", "==", transactionID).Limit(1)
+	iter := query.Documents(ctx)
+	doc, err := iter.Next()
+
+	if err != nil {
+		if err == iterator.Done {
+			return nil, errors.NotFound("Chat for transaction not found", nil)
+		}
+		return nil, errors.Internal("Failed to query chat by transaction ID", err)
+	}
+
+	var chat entity.Chat
+	if err := doc.DataTo(&chat); err != nil {
+		return nil, errors.Internal("Failed to parse chat data", err)
+	}
+
+	return &chat, nil
+}
+
 func (r *firestoreChatRepository) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*entity.Chat, int64, error) {
 	query := r.client.Collection("chats").Where("participants", "array-contains", userID).OrderBy("updatedAt", firestore.Desc)
 
 	countDocs, err := query.Documents(ctx).GetAll()
 	if err != nil {
-		log.Printf("Firestore error while counting chats for user %s: %v", userID, err) // Keep for debugging index issues
+		log.Printf("Firestore error while counting chats for user %s: %v", userID, err)
 		return nil, 0, errors.Internal("Failed to count chats", err)
 	}
 	total := int64(len(countDocs))
@@ -175,13 +230,13 @@ func (r *firestoreChatRepository) ListByUserID(ctx context.Context, userID strin
 			break
 		}
 		if err != nil {
-			log.Printf("Firestore error while iterating chats for user %s: %v", userID, err) // Keep for debugging
+			log.Printf("Firestore error while iterating chats for user %s: %v", userID, err)
 			return nil, 0, errors.Internal("Failed to iterate chats", err)
 		}
 
 		var chat entity.Chat
 		if err := doc.DataTo(&chat); err != nil {
-			log.Printf("Error parsing chat data for user %s: %v", userID, err) // Keep for debugging
+			log.Printf("Error parsing chat data for user %s: %v", userID, err)
 			return nil, 0, errors.Internal("Failed to parse chat data", err)
 		}
 

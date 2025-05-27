@@ -17,7 +17,7 @@ func SetupTransactionRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddlew
 	transactions.POST("", transactionHandler.CreateTransaction)
 	transactions.GET("", transactionHandler.ListTransactions)
 	transactions.GET("/:id", transactionHandler.GetTransaction)
-	transactions.POST("/:id/payment", transactionHandler.ProcessPayment)
+	transactions.POST("/:id/payment", transactionHandler.ProcessPayment) // Buyer initiates payment
 	transactions.POST("/:id/confirm", transactionHandler.ConfirmDelivery)
 	transactions.POST("/:id/dispute", transactionHandler.CreateDispute)
 	transactions.POST("/:id/cancel", transactionHandler.CancelTransaction)
@@ -30,6 +30,7 @@ func SetupTransactionRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddlew
 	admin.GET("", transactionHandler.ListAdminTransactions)
 	admin.GET("/pending-middleman", transactionHandler.ListPendingMiddlemanTransactions)
 	admin.POST("/:id/assign", transactionHandler.AssignMiddleman)
+	admin.POST("/:id/confirm-payment", transactionHandler.ConfirmMiddlemanPayment) // New: Admin confirms middleman payment
 	admin.POST("/:id/complete", transactionHandler.CompleteMiddleman)
 	admin.POST("/:id/resolve-dispute", transactionHandler.ResolveDispute)
 }

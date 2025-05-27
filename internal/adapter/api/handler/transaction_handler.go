@@ -30,7 +30,6 @@ type createTransactionRequest struct {
 }
 
 func (h *TransactionHandler) CreateTransaction(c echo.Context) error {
-
 	var req createTransactionRequest
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, err)
@@ -56,7 +55,6 @@ func (h *TransactionHandler) CreateTransaction(c echo.Context) error {
 }
 
 func (h *TransactionHandler) GetTransaction(c echo.Context) error {
-
 	transactionID := c.Param("id")
 	if transactionID == "" {
 		return response.Error(c, errors.BadRequest("Transaction ID is required", nil))
@@ -73,7 +71,6 @@ func (h *TransactionHandler) GetTransaction(c echo.Context) error {
 }
 
 func (h *TransactionHandler) ListTransactions(c echo.Context) error {
-
 	role := c.QueryParam("role")
 	status := c.QueryParam("status")
 
@@ -102,8 +99,8 @@ type processPaymentRequest struct {
 	PaymentDetails map[string]interface{} `json:"payment_details,omitempty"`
 }
 
+// Modified: ProcessPayment handler
 func (h *TransactionHandler) ProcessPayment(c echo.Context) error {
-
 	transactionID := c.Param("id")
 	if transactionID == "" {
 		return response.Error(c, errors.BadRequest("Transaction ID is required", nil))
@@ -135,8 +132,29 @@ func (h *TransactionHandler) ProcessPayment(c echo.Context) error {
 	return response.Success(c, transaction)
 }
 
-func (h *TransactionHandler) GetTransactionLogs(c echo.Context) error {
+// New: ConfirmMiddlemanPayment handler
+func (h *TransactionHandler) ConfirmMiddlemanPayment(c echo.Context) error {
+	transactionID := c.Param("id")
+	if transactionID == "" {
+		return response.Error(c, errors.BadRequest("Transaction ID is required", nil))
+	}
 
+	adminID := c.Get("uid").(string)
+
+	transaction, err := h.transactionUseCase.ConfirmMiddlemanPayment(
+		c.Request().Context(),
+		adminID,
+		transactionID,
+	)
+
+	if err != nil {
+		return response.Error(c, err)
+	}
+
+	return response.Success(c, transaction)
+}
+
+func (h *TransactionHandler) GetTransactionLogs(c echo.Context) error {
 	transactionID := c.Param("id")
 	if transactionID == "" {
 		return response.Error(c, errors.BadRequest("Transaction ID is required", nil))
@@ -153,7 +171,6 @@ func (h *TransactionHandler) GetTransactionLogs(c echo.Context) error {
 }
 
 func (h *TransactionHandler) ListAdminTransactions(c echo.Context) error {
-
 	status := c.QueryParam("status")
 
 	pagination := utils.GetPaginationParams(c)
@@ -181,7 +198,6 @@ func (h *TransactionHandler) ListAdminTransactions(c echo.Context) error {
 }
 
 func (h *TransactionHandler) ListPendingMiddlemanTransactions(c echo.Context) error {
-
 	pagination := utils.GetPaginationParams(c)
 
 	adminID := c.Get("uid").(string)
@@ -201,7 +217,6 @@ func (h *TransactionHandler) ListPendingMiddlemanTransactions(c echo.Context) er
 }
 
 func (h *TransactionHandler) AssignMiddleman(c echo.Context) error {
-
 	transactionID := c.Param("id")
 	if transactionID == "" {
 		return response.Error(c, errors.BadRequest("Transaction ID is required", nil))
@@ -227,7 +242,6 @@ type completeMiddlemanRequest struct {
 }
 
 func (h *TransactionHandler) CompleteMiddleman(c echo.Context) error {
-
 	transactionID := c.Param("id")
 	if transactionID == "" {
 		return response.Error(c, errors.BadRequest("Transaction ID is required", nil))
@@ -259,7 +273,6 @@ func (h *TransactionHandler) CompleteMiddleman(c echo.Context) error {
 }
 
 func (h *TransactionHandler) ConfirmDelivery(c echo.Context) error {
-
 	transactionID := c.Param("id")
 	if transactionID == "" {
 		return response.Error(c, errors.BadRequest("Transaction ID is required", nil))
@@ -281,7 +294,6 @@ func (h *TransactionHandler) ConfirmDelivery(c echo.Context) error {
 }
 
 func (h *TransactionHandler) CreateDispute(c echo.Context) error {
-
 	transactionID := c.Param("id")
 	if transactionID == "" {
 		return response.Error(c, errors.BadRequest("Transaction ID is required", nil))
@@ -316,7 +328,6 @@ func (h *TransactionHandler) CreateDispute(c echo.Context) error {
 }
 
 func (h *TransactionHandler) ResolveDispute(c echo.Context) error {
-
 	transactionID := c.Param("id")
 	if transactionID == "" {
 		return response.Error(c, errors.BadRequest("Transaction ID is required", nil))
@@ -353,7 +364,6 @@ func (h *TransactionHandler) ResolveDispute(c echo.Context) error {
 }
 
 func (h *TransactionHandler) CancelTransaction(c echo.Context) error {
-
 	transactionID := c.Param("id")
 	if transactionID == "" {
 		return response.Error(c, errors.BadRequest("Transaction ID is required", nil))
