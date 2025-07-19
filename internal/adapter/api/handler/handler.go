@@ -11,6 +11,7 @@ var (
 	productHandler     *ProductHandler
 	reviewHandler      *ReviewHandler
 	transactionHandler *TransactionHandler
+	walletHandler      *WalletHandler
 )
 
 func Setup(
@@ -20,6 +21,7 @@ func Setup(
 	productUseCase *usecase.ProductUseCase,
 	reviewUseCase *usecase.ReviewUseCase,
 	transactionUseCase *usecase.TransactionUseCase,
+	walletUseCase *usecase.WalletUseCase,
 ) {
 	authHandler = NewAuthHandler(authUseCase)
 	userHandler = NewUserHandler(userUseCase)
@@ -27,6 +29,7 @@ func Setup(
 	productHandler = NewProductHandler(productUseCase)
 	reviewHandler = NewReviewHandler(reviewUseCase)
 	transactionHandler = NewTransactionHandler(transactionUseCase)
+	walletHandler = NewWalletHandler(walletUseCase)
 }
 
 func GetAuthHandler() *AuthHandler {
@@ -51,4 +54,8 @@ func GetReviewHandler() *ReviewHandler {
 
 func GetTransactionHandler() *TransactionHandler {
 	return transactionHandler
+}
+
+func GetWalletHandler() *WalletHandler {
+	return walletHandler
 }

@@ -79,6 +79,13 @@ func main() {
 	transactionRepo := repository.NewFirestoreTransactionRepository(firestoreClient)
 	fileMetadataRepo := repository.NewFirestoreFileMetadataRepository(firestoreClient)
 	chatRepo := repository.NewFirestoreChatRepository(firestoreClient)
+	
+	// Wallet repositories
+	walletRepo := repository.NewFirestoreWalletRepository(firestoreClient)
+	walletTxnRepo := repository.NewFirestoreWalletTransactionRepository(firestoreClient)
+	paymentMethodRepo := repository.NewFirestorePaymentMethodRepository(firestoreClient)
+	topupRepo := repository.NewFirestoreTopupRepository(firestoreClient)
+	withdrawRepo := repository.NewFirestoreWithdrawRepository(firestoreClient)
 
 	firebaseAuthClient := firebase.NewFirebaseAuthClient(authClient, cfg.FirebaseApiKey)
 
@@ -93,11 +100,14 @@ func main() {
 	gameTitleUseCase := usecase.NewGameTitleUseCase(gameTitleRepo)
 	productUseCase := usecase.NewProductUseCase(productRepo, gameTitleRepo, userRepo, transactionRepo)
 	reviewUseCase := usecase.NewReviewUseCase(reviewRepo, userRepo)
-	// New: Pass chatUseCase to TransactionUseCase
+	// Wallet use case
+	walletUseCase := usecase.NewWalletUseCase(walletRepo, walletTxnRepo, paymentMethodRepo, topupRepo, withdrawRepo, userRepo)
+	
+	// New: Pass chatUseCase and walletUseCase to TransactionUseCase
 	chatUseCase := usecase.NewChatUseCase(chatRepo, userRepo, productRepo, wsManager)
-	transactionUseCase := usecase.NewTransactionUseCase(transactionRepo, productRepo, userRepo, chatUseCase)
+	transactionUseCase := usecase.NewTransactionUseCase(transactionRepo, productRepo, userRepo, chatUseCase, walletUseCase)
 
-	handler.Setup(authUseCase, userUseCase, gameTitleUseCase, productUseCase, reviewUseCase, transactionUseCase)
+	handler.Setup(authUseCase, userUseCase, gameTitleUseCase, productUseCase, reviewUseCase, transactionUseCase, walletUseCase)
 
 	e := echo.New()
 
