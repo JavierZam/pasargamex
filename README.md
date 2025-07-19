@@ -10,7 +10,9 @@ PasargameX is a secure marketplace platform for game-related transactions, built
 - **Transaction Processing**: Multiple delivery methods including instant and middleman options
 - **Review System**: Rate and review transactions with reporting functionality
 - **File Management**: Upload, store, and manage images for products and verification
-- **Admin Dashboard**: Verify users, manage disputes, handle middleman transactions
+- **Wallet & Payments**: Digital wallet system with top-up, withdraw, and payment methods
+- **Real-time Chat**: WebSocket-based messaging system with online status and typing indicators
+- **Admin Dashboard**: Verify users, manage disputes, handle middleman transactions, wallet management
 - **User Verification**: Identity verification process for sellers
 
 ## Tech Stack
@@ -125,8 +127,19 @@ The API follows RESTful principles with these main endpoints:
   - `GET /v1/files/view/:id` - View file
   - `POST /v1/files/delete` - Delete file
 
+- **Wallet & Payments**
+  - `GET /v1/wallet` - Get wallet balance
+  - `POST /v1/wallet/topup` - Create top-up request
+  - `POST /v1/wallet/withdraw` - Create withdraw request
+  - `GET /v1/wallet/transactions` - Get wallet transaction history
+  - `GET /v1/wallet/payment-methods` - List payment methods
+  - `POST /v1/wallet/payment-methods` - Add payment method
+
 - **Chat & Messaging**
-  - 
+  - `GET /v1/chats` - List user chats
+  - `GET /v1/chats/:id` - Get chat details
+  - `POST /v1/chats/:id/messages` - Send message
+  - `WS /v1/ws` - WebSocket connection for real-time messaging
 
 ## Deployment
 
