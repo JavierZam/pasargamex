@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"pasargamex/internal/domain/entity"
@@ -27,6 +28,7 @@ type TransactionUseCase struct {
 	userRepo        repository.UserRepository
 	feeCalculator   FeeCalculator
 	chatUseCase     *ChatUseCase
+	walletUseCase   *WalletUseCase
 }
 
 func NewTransactionUseCase(
@@ -34,6 +36,7 @@ func NewTransactionUseCase(
 	productRepo repository.ProductRepository,
 	userRepo repository.UserRepository,
 	chatUseCase *ChatUseCase,
+	walletUseCase *WalletUseCase,
 ) *TransactionUseCase {
 	return &TransactionUseCase{
 		transactionRepo: transactionRepo,
@@ -41,13 +44,20 @@ func NewTransactionUseCase(
 		userRepo:        userRepo,
 		feeCalculator:   &defaultFeeCalculator{},
 		chatUseCase:     chatUseCase,
+		walletUseCase:   walletUseCase,
 	}
 }
 
 type CreateTransactionInput struct {
 	ProductID      string
 	DeliveryMethod string
+	PaymentMethod  string // "wallet" or "external"
 	Notes          string
+}
+
+type ProcessPaymentInput struct {
+	PaymentMethod string
+	PaymentDetails map[string]interface{}
 }
 
 func (uc *TransactionUseCase) CreateTransaction(ctx context.Context, buyerID string, input CreateTransactionInput) (*entity.Transaction, error) {
@@ -157,7 +167,7 @@ func (uc *TransactionUseCase) ListTransactions(ctx context.Context, userID, role
 	return responses, total, nil
 }
 
-// Modified: ProcessPayment now handles middleman transactions differently
+// Modified: ProcessPayment now handles wallet payment and middleman transactions
 func (uc *TransactionUseCase) ProcessPayment(ctx context.Context, userID, transactionID, paymentMethod string, paymentDetails map[string]interface{}) (*entity.Transaction, error) {
 	transaction, err := uc.transactionRepo.GetByID(ctx, transactionID)
 	if err != nil {
@@ -170,6 +180,20 @@ func (uc *TransactionUseCase) ProcessPayment(ctx context.Context, userID, transa
 
 	if transaction.PaymentStatus == "paid" || transaction.PaymentStatus == "refunded" {
 		return nil, errors.BadRequest("Payment already processed or refunded", nil)
+	}
+
+	// Process wallet payment
+	if paymentMethod == "wallet" {
+		if uc.walletUseCase == nil {
+			return nil, errors.InternalServer("Wallet service not available", nil)
+		}
+
+		// Process wallet payment
+		description := fmt.Sprintf("Payment for transaction %s - %s", transaction.ID, transaction.ProductID)
+		_, err := uc.walletUseCase.ProcessWalletPayment(ctx, userID, transaction.TotalAmount, description, transaction.ID)
+		if err != nil {
+			return nil, err // This will return appropriate error (insufficient balance, etc.)
+		}
 	}
 
 	transaction.PaymentMethod = paymentMethod
@@ -191,6 +215,11 @@ func (uc *TransactionUseCase) ProcessPayment(ctx context.Context, userID, transa
 	}
 
 	if err := uc.transactionRepo.Update(ctx, transaction); err != nil {
+		// If transaction update fails and we used wallet, we should refund
+		if paymentMethod == "wallet" && uc.walletUseCase != nil {
+			refundDescription := fmt.Sprintf("Refund for failed transaction %s", transaction.ID)
+			uc.walletUseCase.ProcessWalletRefund(ctx, userID, transaction.TotalAmount, refundDescription, transaction.ID)
+		}
 		return nil, err
 	}
 
