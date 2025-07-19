@@ -3,8 +3,10 @@ package response
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	apperrors "pasargamex/pkg/errors"
+	"github.com/go-playground/validator/v10"
 
 	"github.com/labstack/echo/v4"
 )
@@ -93,6 +95,13 @@ func SuccessPaginated(c echo.Context, items interface{}, total int64, limit, off
 }
 
 func Error(c echo.Context, err error) error {
+	// Handle validation errors
+	var validationErr validator.ValidationErrors
+	if errors.As(err, &validationErr) {
+		return handleValidationError(c, validationErr)
+	}
+
+	// Handle application errors
 	var appErr *apperrors.AppError
 	if errors.As(err, &appErr) {
 		return c.JSON(appErr.Status, Response{
@@ -109,6 +118,64 @@ func Error(c echo.Context, err error) error {
 		Error: &ErrorInfo{
 			Code:    "INTERNAL_ERROR",
 			Message: "An unexpected error occurred",
+		},
+	})
+}
+
+func handleValidationError(c echo.Context, validationErr validator.ValidationErrors) error {
+	for _, err := range validationErr {
+		field := strings.ToLower(err.Field())
+		tag := err.Tag()
+		param := err.Param()
+
+		var message string
+		switch tag {
+		case "required":
+			message = field + " is required"
+		case "min":
+			if field == "amount" {
+				if param == "10000" {
+					message = "Minimum amount is 10,000 IDR"
+				} else {
+					message = field + " must be at least " + param
+				}
+			} else {
+				message = field + " must be at least " + param
+			}
+		case "max":
+			if field == "amount" {
+				if param == "50000000" {
+					message = "Maximum withdrawal amount is 50,000,000 IDR"
+				} else if param == "100000000" {
+					message = "Maximum topup amount is 100,000,000 IDR"
+				} else {
+					message = field + " must be at most " + param
+				}
+			} else {
+				message = field + " must be at most " + param
+			}
+		case "oneof":
+			message = field + " must be one of: " + param
+		case "email":
+			message = field + " must be a valid email address"
+		default:
+			message = field + " is invalid"
+		}
+
+		return c.JSON(http.StatusBadRequest, Response{
+			Success: false,
+			Error: &ErrorInfo{
+				Code:    "VALIDATION_ERROR",
+				Message: message,
+			},
+		})
+	}
+
+	return c.JSON(http.StatusBadRequest, Response{
+		Success: false,
+		Error: &ErrorInfo{
+			Code:    "VALIDATION_ERROR",
+			Message: "Invalid input data",
 		},
 	})
 }

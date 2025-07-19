@@ -58,3 +58,9 @@ func (p PaginationParams) ToMap() map[string]interface{} {
 		"offset": p.Offset,
 	}
 }
+
+// Pagination represents pagination configuration for wallet operations
+type Pagination struct {
+	Page  int
+	Limit int
+}

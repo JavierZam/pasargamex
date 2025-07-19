@@ -12,4 +12,34 @@ firebase-service-account.json
 *.out
 vendor/
 tmp/
-*.json
+
+# Binary files
+pasargamex
+*.exe
+*.bin
+*.so
+*.dll
+/build/
+/dist/
+/bin/
+
+# CRITICAL: Firebase service account keys (NEVER COMMIT!)
+*firebase-adminsdk*.json
+*service-account*.json
+serviceAccountKey.json
+firebase-adminsdk-*.json
+pasargamex-*-firebase-adminsdk-*.json
+
+# Environment and secrets
+.env
+.env.local
+.env.production
+*.key
+*.pem
+secrets/
+
+# IDE files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
