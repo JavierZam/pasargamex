@@ -8,6 +8,7 @@ import (
 
 	"pasargamex/internal/domain/entity"
 	"pasargamex/internal/domain/repository"
+	"pasargamex/internal/infrastructure/ratelimit"
 	ws "pasargamex/internal/infrastructure/websocket"
 	"pasargamex/pkg/errors"
 )
@@ -17,6 +18,7 @@ type ChatUseCase struct {
 	userRepo    repository.UserRepository
 	productRepo repository.ProductRepository
 	wsManager   *ws.Manager
+	rateLimiter *ratelimit.RateLimiter
 }
 
 func NewChatUseCase(
@@ -25,11 +27,15 @@ func NewChatUseCase(
 	productRepo repository.ProductRepository,
 	wsManager *ws.Manager,
 ) *ChatUseCase {
+	rateLimiter := ratelimit.NewRateLimiter()
+	rateLimiter.StartCleanupRoutine() // Start cleanup routine
+	
 	return &ChatUseCase{
 		chatRepo:    chatRepo,
 		userRepo:    userRepo,
 		productRepo: productRepo,
 		wsManager:   wsManager,
+		rateLimiter: rateLimiter,
 	}
 }
 
@@ -71,6 +77,19 @@ type MessageResponse struct {
 }
 
 func (uc *ChatUseCase) CreateChat(ctx context.Context, userID string, input CreateChatInput) (*ChatResponse, error) {
+	// Rate limiting check
+	allowed, waitTime := uc.rateLimiter.Allow(userID, "create_chat")
+	if !allowed {
+		log.Printf("CreateChat Rate Limited: User %s must wait %v", userID, waitTime)
+		return nil, errors.TooManyRequests("Rate limit exceeded. Please wait before creating another chat", waitTime)
+	}
+
+	// Prevent self-chat
+	if userID == input.RecipientID {
+		log.Printf("CreateChat Error: User %s attempted to create chat with themselves", userID)
+		return nil, errors.BadRequest("You cannot create a chat with yourself", nil)
+	}
+
 	recipient, err := uc.userRepo.GetByID(ctx, input.RecipientID)
 	if err != nil {
 		log.Printf("CreateChat Error: Recipient %s not found: %v", input.RecipientID, err)
@@ -149,6 +168,13 @@ func (uc *ChatUseCase) CreateChat(ctx context.Context, userID string, input Crea
 
 // New: CreateMiddlemanChat creates a group chat for a transaction involving a middleman
 func (uc *ChatUseCase) CreateMiddlemanChat(ctx context.Context, input CreateMiddlemanChatInput) (*ChatResponse, error) {
+	// Validate that all participants are different users
+	if input.BuyerID == input.SellerID || input.BuyerID == input.MiddlemanID || input.SellerID == input.MiddlemanID {
+		log.Printf("CreateMiddlemanChat Error: Duplicate participants detected - Buyer: %s, Seller: %s, Middleman: %s", 
+			input.BuyerID, input.SellerID, input.MiddlemanID)
+		return nil, errors.BadRequest("All participants must be different users", nil)
+	}
+
 	// Validate participants exist (removed unused variable assignments)
 	if _, err := uc.userRepo.GetByID(ctx, input.BuyerID); err != nil {
 		return nil, errors.NotFound("Buyer not found", err)
@@ -235,6 +261,23 @@ func containsString(slice []string, item string) bool {
 
 // Updated: SendMessage now accepts ProductID, AttachmentURL, and Metadata
 func (uc *ChatUseCase) SendMessage(ctx context.Context, userID string, input SendMessageInput) (*MessageResponse, error) {
+	// Rate limiting check
+	allowed, waitTime := uc.rateLimiter.Allow(userID, "send_message")
+	if !allowed {
+		log.Printf("SendMessage Rate Limited: User %s must wait %v", userID, waitTime)
+		
+		// Send rate limit notification via WebSocket
+		notification := map[string]interface{}{
+			"type":      "rate_limit_exceeded",
+			"message":   "You are sending messages too quickly. Please slow down.",
+			"wait_time": waitTime.Seconds(),
+		}
+		notificationJSON, _ := json.Marshal(notification)
+		uc.wsManager.SendToUser(userID, notificationJSON)
+		
+		return nil, errors.TooManyRequests("Rate limit exceeded. Please wait before sending another message", waitTime)
+	}
+
 	chat, err := uc.chatRepo.GetByID(ctx, input.ChatID)
 	if err != nil {
 		log.Printf("SendMessage Error: Chat %s not found: %v", input.ChatID, err)
@@ -637,6 +680,13 @@ func contains(slice []string, item string) bool {
 }
 
 func (uc *ChatUseCase) HandleTypingEvent(ctx context.Context, userID, chatID string, isTyping bool) {
+	// Rate limiting for typing events
+	allowed, _ := uc.rateLimiter.Allow(userID, "typing")
+	if !allowed {
+		log.Printf("HandleTypingEvent Rate Limited: User %s", userID)
+		return // Silently ignore excessive typing events
+	}
+
 	chat, err := uc.chatRepo.GetByID(ctx, chatID)
 	if err != nil {
 		log.Printf("HandleTypingEvent Error: Chat %s not found: %v", chatID, err)

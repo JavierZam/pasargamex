@@ -17,6 +17,7 @@ func SetupUserRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, ad
 	users.GET("/me", userHandler.GetProfile)
 	users.PATCH("/me", userHandler.UpdateProfile)
 	users.PUT("/me/password", userHandler.UpdatePassword)
+	users.GET("/:id", userHandler.GetUserByID) // New: Get user profile by ID
 
 	users.POST("/me/verification", userHandler.SubmitVerification)
 

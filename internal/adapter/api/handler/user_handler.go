@@ -90,6 +90,27 @@ func (h *UserHandler) GetProfile(c echo.Context) error {
 	})
 }
 
+// New: GetUserByID - get any user profile by ID (for chat purposes)
+func (h *UserHandler) GetUserByID(c echo.Context) error {
+	targetUserID := c.Param("id")
+	if targetUserID == "" {
+		return response.Error(c, errors.BadRequest("User ID is required", nil))
+	}
+
+	user, err := h.userUseCase.GetUserProfile(c.Request().Context(), targetUserID)
+	if err != nil {
+		return response.Error(c, err)
+	}
+
+	return response.Success(c, map[string]interface{}{
+		"id":       user.ID,
+		"email":    user.Email,
+		"username": user.Username,
+		"phone":    user.Phone,
+		"bio":      user.Bio,
+	})
+}
+
 func (h *UserHandler) UpdatePassword(c echo.Context) error {
 	var req struct {
 		CurrentPassword string `json:"current_password" validate:"required"`

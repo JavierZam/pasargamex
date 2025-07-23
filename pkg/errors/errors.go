@@ -100,3 +100,12 @@ func InternalServer(message string, err error) *AppError {
 		Err:     err,
 	}
 }
+
+func TooManyRequests(message string, waitTime interface{}) *AppError {
+	return &AppError{
+		Code:    "TOO_MANY_REQUESTS",
+		Message: message,
+		Status:  http.StatusTooManyRequests,
+		Err:     nil,
+	}
+}
