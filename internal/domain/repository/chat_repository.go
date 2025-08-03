@@ -21,4 +21,8 @@ type ChatRepository interface {
 	GetChatByTransactionID(ctx context.Context, transactionID string) (*entity.Chat, error) // New
 	GetMessageByID(ctx context.Context, chatID, messageID string) (*entity.Message, error)  // New
 	UpdateMessage(ctx context.Context, chatID string, message *entity.Message) error        // New
+	
+	// New methods for group chat functionality
+	GetGroupChatByProductAndParticipants(ctx context.Context, productID string, participants []string) (*entity.Chat, error) // New
+	ListAdminUsers(ctx context.Context) ([]*entity.User, error) // New for middleman selection
 }

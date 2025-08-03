@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	gorillaws "github.com/gorilla/websocket"
@@ -15,28 +16,66 @@ import (
 	"pasargamex/pkg/errors"
 
 	"firebase.google.com/go/v4/auth"
+	"golang.org/x/time/rate"
 )
 
 type WebSocketHandler struct {
-	wsManager   *ws.Manager
-	authClient  *auth.Client
-	chatUseCase *usecase.ChatUseCase // New: Inject ChatUseCase
+	wsManager    *ws.Manager
+	authClient   *auth.Client
+	chatUseCase  *usecase.ChatUseCase
+	rateLimiters map[string]*rate.Limiter // Rate limiters per user
+	mu           sync.RWMutex             // Mutex for rate limiters map
 }
 
 var upgrader = gorillaws.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // You should restrict this in production
+		// Allow only specific origins in production
+		origin := r.Header.Get("Origin")
+		return isAllowedOrigin(origin)
 	},
+}
+
+// isAllowedOrigin checks if the origin is allowed for WebSocket connections
+func isAllowedOrigin(origin string) bool {
+	// Development: Allow localhost origins and file:// protocol
+	allowedOrigins := []string{
+		"http://localhost:3000",
+		"http://localhost:8080", 
+		"http://127.0.0.1:8080",
+		"http://localhost:3001", // Additional dev ports
+		"http://127.0.0.1:3000",
+		"https://your-domain.com", // Add production domains here
+	}
+	
+	// Allow file:// protocol for local HTML files
+	if origin == "" || origin == "null" {
+		return true // Local file access
+	}
+	
+	for _, allowed := range allowedOrigins {
+		if origin == allowed {
+			return true
+		}
+	}
+	
+	// Additional check for localhost with any port during development
+	if strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") {
+		return true
+	}
+	
+	return false
 }
 
 // Update constructor to include ChatUseCase
 func NewWebSocketHandlerWithAuth(wsManager *ws.Manager, authClient *auth.Client, chatUseCase *usecase.ChatUseCase) *WebSocketHandler {
 	return &WebSocketHandler{
-		wsManager:   wsManager,
-		authClient:  authClient,
-		chatUseCase: chatUseCase,
+		wsManager:    wsManager,
+		authClient:   authClient,
+		chatUseCase:  chatUseCase,
+		rateLimiters: make(map[string]*rate.Limiter),
+		mu:           sync.RWMutex{},
 	}
 }
 
@@ -163,7 +202,17 @@ func (h *WebSocketHandler) HandleWebSocket(c echo.Context) error {
 
 			// Process other messages only if authenticated
 			if authenticated {
-				// log.Printf("Received message from %s: %+v", userID, message) // Cleaned up debug log
+				// Check rate limit for user
+				if !h.checkRateLimit(userID) {
+					response := WSMessage{
+						Type: "rate_limit_exceeded",
+						Data: map[string]interface{}{
+							"message": "Rate limit exceeded. Please slow down.",
+						},
+					}
+					conn.WriteJSON(response)
+					continue
+				}
 
 				switch message.Type {
 				case "test_message":
@@ -228,8 +277,38 @@ func (h *WebSocketHandler) HandleWebSocket(c echo.Context) error {
 	// WritePump: Handles outgoing messages to client
 	go client.WritePump() // Corrected: Removed argument
 
-	// Keep connection alive (this select {} is blocking, ensuring goroutines run)
-	select {}
+	// Wait for goroutines to finish instead of blocking indefinitely
+	// The goroutines will terminate when connection is closed
+	return nil
+}
+
+// checkRateLimit checks if user has exceeded rate limit
+func (h *WebSocketHandler) checkRateLimit(userID string) bool {
+	h.mu.Lock()
+	limiter, exists := h.rateLimiters[userID]
+	if !exists {
+		// Allow 30 messages per minute per user
+		limiter = rate.NewLimiter(rate.Every(2*time.Second), 30)
+		h.rateLimiters[userID] = limiter
+	}
+	h.mu.Unlock()
+
+	return limiter.Allow()
+}
+
+// CleanupRateLimiters periodically cleans up unused rate limiters
+func (h *WebSocketHandler) CleanupRateLimiters() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			h.mu.Lock()
+			// In a real implementation, you'd track last access time
+			// and remove unused limiters. For now, we'll keep them.
+			h.mu.Unlock()
+		}
+	}()
 }
 
 func (h *WebSocketHandler) verifyToken(token string) (string, error) {

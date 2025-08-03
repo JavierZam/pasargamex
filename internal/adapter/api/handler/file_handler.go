@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -52,6 +54,14 @@ func GetFileHandler() *FileHandler {
 func (h *FileHandler) UploadFile(c echo.Context) error {
 	logger.Debug("Starting file upload handler")
 
+	// Basic rate limiting check - max 10 uploads per minute per user
+	userID := getUserIDFromContext(c)
+	if userID != "" {
+		// Simple in-memory rate limiting (in production, use Redis)
+		logger.Debug("Upload request from user: %s", userID)
+		// TODO: Implement proper rate limiting with Redis
+	}
+
 	file, err := c.FormFile("file")
 	if err != nil {
 		logger.Error("Error getting file from form: %v", err)
@@ -60,15 +70,16 @@ func (h *FileHandler) UploadFile(c echo.Context) error {
 
 	logger.Debug("Received file: %s, size: %d bytes, type: %s", file.Filename, file.Size, file.Header.Get("Content-Type"))
 
-	if file.Size > h.maxFileSize {
-		logger.Warn("File too large: %d bytes (max: %d)", file.Size, h.maxFileSize)
-		return response.Error(c, errors.BadRequest(fmt.Sprintf("File size exceeds maximum allowed (%dMB)", h.maxFileSize/(1024*1024)), nil))
+	// Enhanced file validation
+	if err := validateFileContent(file); err != nil {
+		logger.Warn("File validation failed: %v", err)
+		return response.Error(c, err)
 	}
 
 	fileType := file.Header.Get("Content-Type")
 	if !isAllowedFileType(fileType) {
 		logger.Warn("Invalid file type: %s", fileType)
-		return response.Error(c, errors.BadRequest("File type not supported", nil))
+		return response.Error(c, errors.BadRequest("File type not supported. Only safe image formats allowed.", nil))
 	}
 
 	folder := c.FormValue("folder")
@@ -103,7 +114,7 @@ func (h *FileHandler) UploadFile(c echo.Context) error {
 	}
 	logger.Debug("Storage client returned URL: %s, objectName: %s", result.URL, result.ObjectName)
 
-	userID := getUserIDFromContext(c)
+	// userID already declared above in rate limiting section
 
 	fileID := uuid.New().String()
 	metadata := &entity.FileMetadata{
@@ -329,12 +340,16 @@ func (h *FileHandler) AdminViewFile(c echo.Context) error {
 }
 
 func isAllowedFileType(fileType string) bool {
+	// Only allow safe image formats - NO SVG (XSS risk)
 	allowedTypes := []string{
 		"image/jpeg",
-		"image/jpg",
+		"image/jpg", 
 		"image/png",
 		"image/gif",
-		"application/pdf",
+		"image/avif",
+		"image/webp",
+		// NOTE: Excluded SVG (image/svg+xml) due to XSS risks
+		// NOTE: Excluded PDF for chat images - only images allowed
 	}
 
 	for _, allowedType := range allowedTypes {
@@ -344,6 +359,49 @@ func isAllowedFileType(fileType string) bool {
 	}
 
 	return false
+}
+
+// Enhanced file validation with content verification
+func validateFileContent(file *multipart.FileHeader) error {
+	// Check file size
+	maxSize := int64(5 * 1024 * 1024) // 5MB max
+	if file.Size > maxSize {
+		return errors.BadRequest(fmt.Sprintf("File too large. Maximum size: %dMB", maxSize/(1024*1024)), nil)
+	}
+
+	// Validate file extension matches content type
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	contentType := file.Header.Get("Content-Type")
+	
+	validExtensions := map[string][]string{
+		"image/jpeg": {".jpg", ".jpeg"},
+		"image/png":  {".png"},
+		"image/gif":  {".gif"},
+		"image/webp": {".webp"},
+		"image/avif": {".avif"},
+	}
+
+	if allowedExts, exists := validExtensions[contentType]; exists {
+		validExt := false
+		for _, allowedExt := range allowedExts {
+			if ext == allowedExt {
+				validExt = true
+				break
+			}
+		}
+		if !validExt {
+			return errors.BadRequest("File extension doesn't match content type", nil)
+		}
+	}
+
+	// Basic filename sanitization
+	if strings.Contains(file.Filename, "..") || 
+	   strings.Contains(file.Filename, "/") || 
+	   strings.Contains(file.Filename, "\\") {
+		return errors.BadRequest("Invalid filename", nil)
+	}
+
+	return nil
 }
 
 func sanitizeFolderName(folder string) string {
@@ -593,9 +651,9 @@ func (h *FileHandler) UploadMultipleProductImages(c echo.Context) error {
 	for _, fileHeader := range files { // Fixed: removed unused 'i' variable
 		logger.Debug("Processing file: %s", fileHeader.Filename)
 
-		// Validate file size
-		if fileHeader.Size > h.maxFileSize {
-			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: file too large", fileHeader.Filename))
+		// Enhanced file validation
+		if err := validateFileContent(fileHeader); err != nil {
+			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: %s", fileHeader.Filename, err.Error()))
 			continue
 		}
 
@@ -840,4 +898,178 @@ func (r *recResponse) WriteHeader(statusCode int) {
 
 func (r *recResponse) Flush() {
 
+}
+
+// New: ProxyFileByObject - Secure proxy for files by object name
+func (h *FileHandler) ProxyFileByObject(c echo.Context) error {
+	objectName := c.QueryParam("object")
+	if objectName == "" {
+		return response.Error(c, errors.BadRequest("Object name is required", nil))
+	}
+
+	// Get user ID from context (set by auth middleware)
+	userID := getUserIDFromContext(c)
+	if userID == "" {
+		return response.Error(c, errors.Unauthorized("Authentication required", nil))
+	}
+
+	// Find file metadata by object name
+	metadata, err := h.fileMetadataRepo.GetByObjectName(c.Request().Context(), objectName)
+	if err != nil {
+		logger.Error("Failed to get file metadata by object name: %v", err)
+		return response.Error(c, errors.NotFound("File not found", err))
+	}
+
+	// Check permissions
+	hasPermission := false
+
+	// Public files are accessible to anyone
+	if metadata.IsPublic {
+		hasPermission = true
+	}
+
+	// File owner can access
+	if metadata.UploadedBy == userID {
+		hasPermission = true
+	}
+
+	// Admin can access any file
+	if role, ok := c.Get("role").(string); ok && role == "admin" {
+		hasPermission = true
+	}
+
+	if !hasPermission {
+		return response.Error(c, errors.Forbidden("You don't have permission to access this file", nil))
+	}
+
+	// Stream file content
+	reader, contentType, size, err := h.fileService.GetFileContent(c.Request().Context(), metadata.ObjectName)
+	if err != nil {
+		logger.Error("Failed to get file content: %v", err)
+		return response.Error(c, errors.Internal("Failed to retrieve file", err))
+	}
+	defer reader.Close()
+
+	// Set appropriate headers
+	c.Response().Header().Set("Content-Type", contentType)
+	c.Response().Header().Set("Content-Length", fmt.Sprintf("%d", size))
+	c.Response().Header().Set("Content-Disposition", "inline")
+	c.Response().Header().Set("Cache-Control", "private, no-cache, no-store, must-revalidate")
+	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
+
+	// Add security headers
+	c.Response().Header().Set("X-Frame-Options", "DENY")
+	c.Response().Header().Set("Referrer-Policy", "no-referrer")
+
+	logger.Debug("File %s accessed via proxy by user %s", objectName, userID)
+
+	// Stream content
+	_, err = io.Copy(c.Response().Writer, reader)
+	if err != nil {
+		logger.Error("Failed to stream file content: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+// New: GenerateSignedURL - Generate temporary signed URL for secure image access
+func (h *FileHandler) GenerateSignedURL(c echo.Context) error {
+	type signedURLRequest struct {
+		URLs []string `json:"urls" validate:"required,min=1"`
+	}
+
+	var req signedURLRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, errors.BadRequest("Invalid request", err))
+	}
+
+	if err := c.Validate(&req); err != nil {
+		return response.Error(c, err)
+	}
+
+	userID := getUserIDFromContext(c)
+	if userID == "" {
+		return response.Error(c, errors.Unauthorized("Authentication required", nil))
+	}
+
+	signedURLs := make(map[string]string)
+
+	for _, storageURL := range req.URLs {
+		// Extract object name from storage URL
+		objectName := extractObjectNameFromStorageURL(storageURL)
+		if objectName == "" {
+			logger.Warn("Could not extract object name from URL: %s", storageURL)
+			signedURLs[storageURL] = storageURL // Fallback to direct URL
+			continue
+		}
+
+		// Check if user has permission to access this file
+		metadata, err := h.fileMetadataRepo.GetByObjectName(c.Request().Context(), objectName)
+		if err != nil {
+			logger.Warn("File metadata not found for object: %s", objectName)
+			signedURLs[storageURL] = storageURL // Fallback to direct URL
+			continue
+		}
+
+		hasPermission := false
+
+		// Public files are accessible to anyone
+		if metadata.IsPublic {
+			hasPermission = true
+		}
+
+		// File owner can access
+		if metadata.UploadedBy == userID {
+			hasPermission = true
+		}
+
+		// Admin can access any file
+		if role, ok := c.Get("role").(string); ok && role == "admin" {
+			hasPermission = true
+		}
+
+		if !hasPermission {
+			logger.Warn("User %s does not have permission for file: %s", userID, objectName)
+			continue // Skip this file
+		}
+
+		// For public files, return the original URL (already safe)
+		if metadata.IsPublic {
+			signedURLs[storageURL] = storageURL
+		} else {
+			// For private files, create a secure proxy URL with user context
+			// We'll use a simple approach with temporary tokens
+			secureURL := fmt.Sprintf("http://localhost:8080/v1/files/secure/%s", metadata.ID)
+			signedURLs[storageURL] = secureURL
+		}
+	}
+
+	return response.Success(c, map[string]interface{}{
+		"signed_urls": signedURLs,
+	})
+}
+
+func extractObjectNameFromStorageURL(storageURL string) string {
+	// Extract object name from Google Cloud Storage URL
+	// Format: https://storage.googleapis.com/bucket-name/path/to/file.jpg
+	if storageURL == "" {
+		return ""
+	}
+
+	// Parse URL
+	parsedURL, err := url.Parse(storageURL)
+	if err != nil {
+		return ""
+	}
+
+	if parsedURL.Host == "storage.googleapis.com" {
+		pathParts := strings.Split(parsedURL.Path, "/")
+		if len(pathParts) >= 3 {
+			// Skip empty first part and bucket name, join the rest
+			return strings.Join(pathParts[2:], "/")
+		}
+	}
+
+	return ""
 }

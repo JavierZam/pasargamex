@@ -122,6 +122,8 @@ func main() {
 
 	chatHandler := handler.NewChatHandler(chatUseCase)
 	wsHandler := handler.NewWebSocketHandlerWithAuth(wsManager, authClient, chatUseCase)
+	// Start cleanup routine for rate limiters
+	wsHandler.CleanupRateLimiters()
 
 	e.GET("/health", func(c echo.Context) error {
 		return c.JSON(200, map[string]string{"status": "ok"})

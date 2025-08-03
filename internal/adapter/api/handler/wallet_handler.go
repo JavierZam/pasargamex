@@ -32,7 +32,7 @@ func getUserID(c echo.Context) (string, error) {
 }
 
 type createWalletRequest struct {
-	Currency string `json:"currency" validate:"omitempty,oneof=IDR USD"`
+	Currency string `json:"currency" validate:"omitempty,oneof=IDR"`
 }
 
 type topupWalletRequest struct {

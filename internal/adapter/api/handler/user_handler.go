@@ -87,6 +87,8 @@ func (h *UserHandler) GetProfile(c echo.Context) error {
 		"username": user.Username,
 		"phone":    user.Phone,
 		"bio":      user.Bio,
+		"role":     user.Role,
+		"status":   user.Status,
 	})
 }
 
@@ -203,4 +205,42 @@ func (h *UserHandler) ProcessVerification(c echo.Context) error {
 	}
 
 	return response.Success(c, user)
+}
+
+type updateUserRoleRequest struct {
+	Role string `json:"role" validate:"required,oneof=user admin seller buyer"`
+}
+
+// UpdateUserRole allows admin to update any user's role
+func (h *UserHandler) UpdateUserRole(c echo.Context) error {
+	userID := c.Param("userId")
+	if userID == "" {
+		return response.Error(c, errors.BadRequest("User ID is required", nil))
+	}
+
+	var req updateUserRoleRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, err)
+	}
+
+	if err := c.Validate(&req); err != nil {
+		return response.Error(c, err)
+	}
+
+	adminID := c.Get("uid").(string)
+
+	user, err := h.userUseCase.UpdateUserRole(c.Request().Context(), adminID, userID, req.Role)
+	if err != nil {
+		return response.Error(c, err)
+	}
+
+	return response.Success(c, map[string]interface{}{
+		"message": "User role updated successfully",
+		"user": map[string]interface{}{
+			"id":       user.ID,
+			"username": user.Username,
+			"email":    user.Email,
+			"role":     user.Role,
+		},
+	})
 }

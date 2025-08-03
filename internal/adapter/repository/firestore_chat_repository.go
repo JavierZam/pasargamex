@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"log"
+	"sort"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -262,4 +263,70 @@ func (r *firestoreChatRepository) Delete(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+// New: GetGroupChatByProductAndParticipants - Find existing group chat with specific product and participants
+func (r *firestoreChatRepository) GetGroupChatByProductAndParticipants(ctx context.Context, productID string, participants []string) (*entity.Chat, error) {
+	// Sort participants for consistent comparison
+	sort.Strings(participants)
+	
+	// Query chats by product ID first
+	query := r.client.Collection("chats").Where("productId", "==", productID)
+	
+	docs, err := query.Documents(ctx).GetAll()
+	if err != nil {
+		return nil, errors.Internal("Failed to query group chats", err)
+	}
+	
+	// Check each chat to see if participants match
+	for _, doc := range docs {
+		var chat entity.Chat
+		if err := doc.DataTo(&chat); err != nil {
+			continue // Skip malformed documents
+		}
+		
+		// Sort chat participants for comparison
+		chatParticipants := make([]string, len(chat.Participants))
+		copy(chatParticipants, chat.Participants)
+		sort.Strings(chatParticipants)
+		
+		// Check if participants match exactly
+		if len(chatParticipants) == len(participants) {
+			match := true
+			for i, p := range participants {
+				if chatParticipants[i] != p {
+					match = false
+					break
+				}
+			}
+			if match {
+				chat.ID = doc.Ref.ID
+				return &chat, nil
+			}
+		}
+	}
+	
+	return nil, errors.NotFound("Group chat not found", nil)
+}
+
+// New: ListAdminUsers - Get list of admin users for middleman selection
+func (r *firestoreChatRepository) ListAdminUsers(ctx context.Context) ([]*entity.User, error) {
+	query := r.client.Collection("users").Where("role", "==", "admin")
+	
+	docs, err := query.Documents(ctx).GetAll()
+	if err != nil {
+		return nil, errors.Internal("Failed to query admin users", err)
+	}
+	
+	var admins []*entity.User
+	for _, doc := range docs {
+		var user entity.User
+		if err := doc.DataTo(&user); err != nil {
+			continue // Skip malformed documents
+		}
+		user.ID = doc.Ref.ID
+		admins = append(admins, &user)
+	}
+	
+	return admins, nil
 }

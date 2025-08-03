@@ -135,6 +135,35 @@ func (uc *UserUseCase) ProcessVerification(ctx context.Context, adminID, userID,
 	return user, nil
 }
 
+// UpdateUserRole allows admin to update user role
+func (uc *UserUseCase) UpdateUserRole(ctx context.Context, adminID, userID, newRole string) (*entity.User, error) {
+	// Get admin user to verify permissions
+	admin, err := uc.userRepo.GetByID(ctx, adminID)
+	if err != nil {
+		return nil, errors.Internal("Failed to get admin user", err)
+	}
+
+	if admin.Role != "admin" {
+		return nil, errors.Forbidden("Only admins can update user roles", nil)
+	}
+
+	// Get target user
+	user, err := uc.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update role
+	user.Role = newRole
+	user.UpdatedAt = time.Now()
+
+	if err := uc.userRepo.Update(ctx, user); err != nil {
+		return nil, errors.Internal("Failed to update user role", err)
+	}
+
+	return user, nil
+}
+
 func (uc *UserUseCase) GetUserRepository() repository.UserRepository {
 	return uc.userRepo
 }

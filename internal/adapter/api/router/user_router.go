@@ -26,4 +26,5 @@ func SetupUserRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, ad
 	admin.Use(adminMiddleware.AdminOnly)
 
 	admin.POST("/:userId/verification", userHandler.ProcessVerification)
+	admin.PATCH("/:userId/role", userHandler.UpdateUserRole) // New: Update user role
 }

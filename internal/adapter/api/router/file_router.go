@@ -24,6 +24,8 @@ func SetupFileRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, ad
 	files.GET("/list", fileHandler.ListUserFiles)
 
 	files.GET("/view/:id", fileHandler.ViewFile)
+	files.GET("/proxy", fileHandler.ProxyFileByObject) // New: Proxy files by object name
+	files.POST("/signed-urls", fileHandler.GenerateSignedURL) // New: Generate signed URLs for secure access
 
 	products := e.Group("/v1/products")
 	products.Use(authMiddleware.Authenticate)
