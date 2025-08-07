@@ -9,7 +9,7 @@ set -e
 PROJECT_ID=${GCP_PROJECT_ID:-"pasargamex-458303"}
 SERVICE_NAME="pasargamex-api"
 REGION="asia-southeast2"  # Jakarta region
-IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
+IMAGE_NAME="asia-southeast2-docker.pkg.dev/${PROJECT_ID}/pasargamex/${SERVICE_NAME}"
 ENVIRONMENT=${ENVIRONMENT:-"production"}
 
 echo "🚀 Deploying ${SERVICE_NAME} to Google Cloud Run"
@@ -38,7 +38,7 @@ gcloud config set project ${PROJECT_ID}
 # Enable required APIs
 echo "🔧 Enabling required APIs..."
 gcloud services enable run.googleapis.com
-gcloud services enable containerregistry.googleapis.com
+gcloud services enable artifactregistry.googleapis.com
 
 # Build and tag the Docker image
 echo "🔨 Building Docker image..."
@@ -48,12 +48,12 @@ IMAGE_LATEST="${IMAGE_NAME}:latest"
 
 docker build -t ${IMAGE_TAG} -t ${IMAGE_LATEST} -f dockerfile .
 
-# Configure Docker for gcloud
+# Configure Docker for Artifact Registry
 echo "🐳 Configuring Docker authentication..."
-gcloud auth configure-docker
+gcloud auth configure-docker asia-southeast2-docker.pkg.dev
 
-# Push the image to Google Container Registry
-echo "📤 Pushing image to Container Registry..."
+# Push the image to Artifact Registry
+echo "📤 Pushing image to Artifact Registry..."
 docker push ${IMAGE_TAG}
 docker push ${IMAGE_LATEST}
 
