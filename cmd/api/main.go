@@ -73,6 +73,16 @@ func main() {
 	}
 	defer firestoreClient.Close()
 
+	// Get service account path for storage client (fallback only)
+	serviceAccountPath := ""
+	if serviceAccountJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON"); serviceAccountJSON == "" {
+		// Only use file path if env var is not available
+		serviceAccountPath = os.Getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
+		if serviceAccountPath == "" {
+			serviceAccountPath = "./pasargamex-458303-firebase-adminsdk-fbsvc-f079266cd9.json"
+		}
+	}
+
 	storageClient, err := storage.NewCloudStorageClient(
 		ctx,
 		cfg.StorageBucket,
