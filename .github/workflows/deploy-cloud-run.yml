@@ -64,6 +64,13 @@ jobs:
         service_account_key: ${{ secrets.GCP_SA_KEY }}
         project_id: ${{ secrets.GCP_PROJECT_ID }}
         
+    - name: Enable required APIs
+      run: |
+        gcloud services enable run.googleapis.com
+        gcloud services enable containerregistry.googleapis.com
+        gcloud services enable artifactregistry.googleapis.com
+        gcloud services enable cloudbuild.googleapis.com
+        
     - name: Configure Docker to use gcloud as credential helper
       run: gcloud auth configure-docker
       
@@ -133,6 +140,11 @@ jobs:
       with:
         service_account_key: ${{ secrets.GCP_SA_KEY }}
         project_id: ${{ secrets.GCP_PROJECT_ID }}
+        
+    - name: Enable required APIs
+      run: |
+        gcloud services enable run.googleapis.com
+        gcloud services enable containerregistry.googleapis.com
         
     - name: Configure Docker to use gcloud as credential helper
       run: gcloud auth configure-docker
