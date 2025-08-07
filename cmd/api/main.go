@@ -35,16 +35,27 @@ func main() {
 
 	ctx := context.Background()
 
-	serviceAccountPath := os.Getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
-	if serviceAccountPath == "" {
-		serviceAccountPath = "./pasargamex-458303-firebase-adminsdk-fbsvc-f079266cd9.json"
-	}
+	var opt option.ClientOption
+	
+	// Try to get service account from environment variable (for production)
+	serviceAccountJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+	if serviceAccountJSON != "" {
+		log.Printf("Using Firebase service account from environment variable")
+		opt = option.WithCredentialsJSON([]byte(serviceAccountJSON))
+	} else {
+		// Fallback to file path (for local development)
+		serviceAccountPath := os.Getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
+		if serviceAccountPath == "" {
+			serviceAccountPath = "./pasargamex-458303-firebase-adminsdk-fbsvc-f079266cd9.json"
+		}
 
-	if _, err := os.Stat(serviceAccountPath); os.IsNotExist(err) {
-		log.Fatalf("Service account file does not exist: %s", serviceAccountPath)
+		if _, err := os.Stat(serviceAccountPath); os.IsNotExist(err) {
+			log.Fatalf("Service account file does not exist: %s", serviceAccountPath)
+		}
+		
+		log.Printf("Using Firebase service account from file: %s", serviceAccountPath)
+		opt = option.WithCredentialsFile(serviceAccountPath)
 	}
-
-	opt := option.WithCredentialsFile(serviceAccountPath)
 
 	firebaseApp, err := fbapp.NewApp(ctx, &fbapp.Config{ProjectID: cfg.FirebaseProject}, opt)
 	if err != nil {

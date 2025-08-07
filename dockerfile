@@ -36,8 +36,7 @@ COPY --from=builder /app/main .
 # Copy static files needed by the application
 COPY --from=builder /app/websocket-chat-pgx ./websocket-chat-pgx
 
-# Copy Firebase service account key (will be replaced by env var in production)
-COPY --from=builder /app/pasargamex-458303-firebase-adminsdk-fbsvc-f079266cd9.json .
+# Note: Firebase service account is provided via FIREBASE_SERVICE_ACCOUNT_JSON environment variable in production
 
 # Change ownership to non-root user
 RUN chown -R appuser:appuser /app
