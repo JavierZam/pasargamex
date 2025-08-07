@@ -1,31 +1,59 @@
-# Dockerfile
-FROM golang:1.20-alpine AS builder
+# Multi-stage build for Go application optimized for Cloud Run
+FROM golang:1.22.4-alpine AS builder
 
+# Install necessary packages
+RUN apk add --no-cache git ca-certificates
+
+# Set working directory
 WORKDIR /app
 
 # Copy go mod and sum files
 COPY go.mod go.sum ./
+
+# Download dependencies
 RUN go mod download
 
-# Copy the source code
+# Copy source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/api
+# Build the application with optimizations
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o main ./cmd/api/main.go
 
-# Use a smaller image for the final stage
-FROM alpine:latest  
+# Final stage - minimal runtime image
+FROM alpine:latest
 
-WORKDIR /root/
+# Install ca-certificates for HTTPS requests and wget for health check
+RUN apk --no-cache add ca-certificates wget
 
-# Install ca-certificates
-RUN apk --no-cache add ca-certificates
+# Create non-root user for security
+RUN adduser -D -s /bin/sh appuser
 
-# Copy the binary from builder
+WORKDIR /app
+
+# Copy the binary from builder stage
 COPY --from=builder /app/main .
 
-# Expose the port
+# Copy static files needed by the application
+COPY --from=builder /app/websocket-chat-pgx ./websocket-chat-pgx
+
+# Copy Firebase service account key (will be replaced by env var in production)
+COPY --from=builder /app/pasargamex-458303-firebase-adminsdk-fbsvc-f079266cd9.json .
+
+# Change ownership to non-root user
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
+# Expose port (Cloud Run uses PORT env var, defaults to 8080)
 EXPOSE 8080
 
-# Command to run
+# Set default port for Cloud Run
+ENV PORT=8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT}/health || exit 1
+
+# Run the application
 CMD ["./main"]

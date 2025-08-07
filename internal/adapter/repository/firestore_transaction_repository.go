@@ -29,6 +29,14 @@ type TransactionRepository interface {
 
 	GetTransactionStats(ctx context.Context, userID string, period string) (map[string]interface{}, error)
 	HasCompletedTransaction(ctx context.Context, userID, productID string) (bool, error)
+	
+	// Midtrans Integration Methods
+	GetByMidtransOrderID(ctx context.Context, midtransOrderID string) (*entity.Transaction, error)
+	
+	// Approval System Methods
+	CreateApproval(ctx context.Context, approval *entity.TransactionApproval) error
+	GetApprovalsByTransactionID(ctx context.Context, transactionID string) ([]*entity.TransactionApproval, error)
+	UpdateApproval(ctx context.Context, approval *entity.TransactionApproval) error
 }
 
 type firestoreTransactionRepository struct {
@@ -308,8 +316,8 @@ func (r *firestoreTransactionRepository) HasCompletedTransaction(ctx context.Con
 	query := r.client.Collection("transactions").
 		Where("buyerId", "==", userID).
 		Where("productId", "==", productID).
-		Where("status", "==", "completed").
-		Where("paymentStatus", "==", "paid").
+		Where("paymentStatus", "in", []string{"success", "paid"}).
+		Where("credentialsDelivered", "==", true).
 		Limit(1)
 
 	iter := query.Documents(ctx)
@@ -326,4 +334,91 @@ func (r *firestoreTransactionRepository) HasCompletedTransaction(ctx context.Con
 
 	log.Printf("Completed transaction found: %v", doc.Ref.ID)
 	return true, nil
+}
+
+// GetByMidtransOrderID retrieves a transaction by Midtrans order ID
+func (r *firestoreTransactionRepository) GetByMidtransOrderID(ctx context.Context, midtransOrderID string) (*entity.Transaction, error) {
+	log.Printf("Getting transaction by Midtrans order ID: %s", midtransOrderID)
+
+	query := r.client.Collection("transactions").Where("midtransOrderId", "==", midtransOrderID).Limit(1)
+	iter := query.Documents(ctx)
+
+	doc, err := iter.Next()
+	if err != nil {
+		if err == iterator.Done {
+			return nil, errors.NotFound("Transaction not found", nil)
+		}
+		return nil, errors.Internal("Failed to get transaction", err)
+	}
+
+	var transaction entity.Transaction
+	if err := doc.DataTo(&transaction); err != nil {
+		return nil, errors.Internal("Failed to parse transaction", err)
+	}
+
+	transaction.ID = doc.Ref.ID
+	return &transaction, nil
+}
+
+// CreateApproval creates a new transaction approval
+func (r *firestoreTransactionRepository) CreateApproval(ctx context.Context, approval *entity.TransactionApproval) error {
+	if approval.ID == "" {
+		approval.ID = uuid.New().String()
+	}
+
+	now := time.Now()
+	approval.CreatedAt = now
+	approval.UpdatedAt = now
+
+	_, err := r.client.Collection("transaction_approvals").Doc(approval.ID).Set(ctx, approval)
+	if err != nil {
+		return errors.Internal("Failed to create approval", err)
+	}
+
+	log.Printf("Transaction approval created: %s", approval.ID)
+	return nil
+}
+
+// GetApprovalsByTransactionID retrieves all approvals for a transaction
+func (r *firestoreTransactionRepository) GetApprovalsByTransactionID(ctx context.Context, transactionID string) ([]*entity.TransactionApproval, error) {
+	log.Printf("Getting approvals for transaction: %s", transactionID)
+
+	query := r.client.Collection("transaction_approvals").Where("transactionId", "==", transactionID).OrderBy("createdAt", firestore.Asc)
+	iter := query.Documents(ctx)
+
+	var approvals []*entity.TransactionApproval
+	for {
+		doc, err := iter.Next()
+		if err != nil {
+			if err == iterator.Done {
+				break
+			}
+			return nil, errors.Internal("Failed to get approvals", err)
+		}
+
+		var approval entity.TransactionApproval
+		if err := doc.DataTo(&approval); err != nil {
+			log.Printf("Failed to parse approval %s: %v", doc.Ref.ID, err)
+			continue
+		}
+
+		approval.ID = doc.Ref.ID
+		approvals = append(approvals, &approval)
+	}
+
+	log.Printf("Found %d approvals for transaction %s", len(approvals), transactionID)
+	return approvals, nil
+}
+
+// UpdateApproval updates an existing transaction approval
+func (r *firestoreTransactionRepository) UpdateApproval(ctx context.Context, approval *entity.TransactionApproval) error {
+	approval.UpdatedAt = time.Now()
+
+	_, err := r.client.Collection("transaction_approvals").Doc(approval.ID).Set(ctx, approval)
+	if err != nil {
+		return errors.Internal("Failed to update approval", err)
+	}
+
+	log.Printf("Transaction approval updated: %s", approval.ID)
+	return nil
 }

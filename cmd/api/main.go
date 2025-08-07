@@ -19,6 +19,7 @@ import (
 	apimiddleware "pasargamex/internal/adapter/api/middleware"
 	"pasargamex/internal/adapter/api/router"
 	"pasargamex/internal/adapter/repository"
+	"pasargamex/internal/domain/service"
 	"pasargamex/internal/infrastructure/firebase"
 	"pasargamex/internal/infrastructure/storage"
 	"pasargamex/internal/infrastructure/websocket"
@@ -103,9 +104,30 @@ func main() {
 	// Wallet use case
 	walletUseCase := usecase.NewWalletUseCase(walletRepo, walletTxnRepo, paymentMethodRepo, topupRepo, withdrawRepo, userRepo)
 	
+	// Initialize Midtrans Payment gateway service
+	isProduction := cfg.MidtransEnvironment == "production"
+	paymentService := service.NewMidtransPaymentService(cfg.MidtransServerKey, cfg.MidtransClientKey, isProduction)
+	
 	// New: Pass chatUseCase and walletUseCase to TransactionUseCase
 	chatUseCase := usecase.NewChatUseCase(chatRepo, userRepo, productRepo, wsManager)
 	transactionUseCase := usecase.NewTransactionUseCase(transactionRepo, productRepo, userRepo, chatUseCase, walletUseCase)
+	
+	// Enhanced transaction use case with Payment Gateway
+	enhancedTransactionUseCase := usecase.NewEnhancedTransactionUseCase(
+		transactionRepo, 
+		productRepo, 
+		userRepo, 
+		paymentService, 
+		chatUseCase, 
+		walletUseCase,
+	)
+
+	// Escrow manager for credentials and auto-release
+	escrowManagerUseCase := usecase.NewEscrowManagerUseCase(
+		transactionRepo,
+		walletUseCase,
+		chatUseCase,
+	)
 
 	handler.Setup(authUseCase, userUseCase, gameTitleUseCase, productUseCase, reviewUseCase, transactionUseCase, walletUseCase)
 
@@ -122,8 +144,13 @@ func main() {
 
 	chatHandler := handler.NewChatHandler(chatUseCase)
 	wsHandler := handler.NewWebSocketHandlerWithAuth(wsManager, authClient, chatUseCase)
+	paymentHandler := handler.NewPaymentHandler(enhancedTransactionUseCase)
+	escrowHandler := handler.NewEscrowHandler(escrowManagerUseCase)
 	// Start cleanup routine for rate limiters
 	wsHandler.CleanupRateLimiters()
+
+	// Start auto-release background job
+	go escrowManagerUseCase.StartAutoReleaseJob(ctx)
 
 	e.GET("/health", func(c echo.Context) error {
 		return c.JSON(200, map[string]string{"status": "ok"})
@@ -160,10 +187,14 @@ func main() {
 		})
 	}, authMiddleware.Authenticate)
 
-	router.Setup(e, authMiddleware, adminMiddleware, authClient)
+	router.Setup(e, authMiddleware, adminMiddleware, authClient, paymentHandler)
 	router.SetupDevRouter(e, cfg.Environment)
 	router.SetupChatRouter(e, chatHandler, authMiddleware, adminMiddleware)
 	router.SetupWebSocketRouter(e, wsHandler)
+	router.SetupEscrowRoutes(e, escrowHandler, authMiddleware)
+
+	// Serve static files for chat testing
+	e.Static("/websocket-chat-pgx", "websocket-chat-pgx")
 
 	log.Printf("Starting server on port %s...", cfg.ServerPort)
 	e.Logger.Fatal(e.Start(":" + cfg.ServerPort))

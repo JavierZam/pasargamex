@@ -19,4 +19,12 @@ type TransactionRepository interface {
 
 	GetTransactionStats(ctx context.Context, userID string, period string) (map[string]interface{}, error)
 	HasCompletedTransaction(ctx context.Context, userID, productID string) (bool, error)
+	
+	// Midtrans Integration Methods
+	GetByMidtransOrderID(ctx context.Context, midtransOrderID string) (*entity.Transaction, error)
+	
+	// Approval System Methods
+	CreateApproval(ctx context.Context, approval *entity.TransactionApproval) error
+	GetApprovalsByTransactionID(ctx context.Context, transactionID string) ([]*entity.TransactionApproval, error)
+	UpdateApproval(ctx context.Context, approval *entity.TransactionApproval) error
 }

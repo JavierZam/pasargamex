@@ -1,0 +1,59 @@
+name: Cleanup Preview Deployments
+
+on:
+  pull_request:
+    types: [closed]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  SERVICE_NAME: pasargamex-api
+  REGION: asia-southeast2
+
+jobs:
+  cleanup:
+    name: Cleanup PR Preview
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Set up Google Cloud CLI
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+        
+    - name: Delete preview Cloud Run service
+      run: |
+        SERVICE_NAME_PR="${SERVICE_NAME}-pr-${{ github.event.number }}"
+        echo "Deleting preview service: $SERVICE_NAME_PR"
+        
+        # Check if service exists before trying to delete
+        if gcloud run services describe $SERVICE_NAME_PR --region=$REGION --quiet >/dev/null 2>&1; then
+          gcloud run services delete $SERVICE_NAME_PR --region=$REGION --quiet
+          echo "✅ Preview service deleted successfully"
+        else
+          echo "ℹ️ Preview service not found (may have been deleted already)"
+        fi
+        
+    - name: Delete preview Docker images (optional cleanup)
+      run: |
+        IMAGE_TAG="pr-${{ github.event.number }}"
+        echo "Attempting to delete preview image with tag: $IMAGE_TAG"
+        
+        # This is optional since GCR images don't consume significant cost
+        # Uncomment if you want aggressive cleanup
+        # gcloud container images delete gcr.io/$PROJECT_ID/$SERVICE_NAME:$IMAGE_TAG --quiet --force-delete-tags || true
+        
+        echo "✅ Cleanup completed"
+        
+    - name: Comment on PR
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `🧹 **Preview Environment Cleaned Up**\n\n` +
+                  `The preview deployment for this PR has been automatically removed.\n` +
+                  `Resources have been cleaned up from Google Cloud Run.`
+          });

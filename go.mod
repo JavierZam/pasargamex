@@ -11,7 +11,9 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v4 v4.13.3
+	github.com/midtrans/midtrans-go v1.3.8
 	github.com/stretchr/testify v1.10.0
+	golang.org/x/time v0.8.0
 	google.golang.org/api v0.215.0
 	google.golang.org/grpc v1.67.3
 )
@@ -68,7 +70,6 @@ require (
 	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
-	golang.org/x/time v0.8.0 // indirect
 	google.golang.org/appengine/v2 v2.0.6 // indirect
 	google.golang.org/genproto v0.0.0-20241118233622-e639e219e697 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20241209162323-e6fa225c2576 // indirect

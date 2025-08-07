@@ -1,0 +1,54 @@
+# Git files
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Environment files (will be set via Cloud Run environment variables)
+.env
+.env.local
+.env.example
+
+# Development files
+*.log
+server.log
+
+# Test files
+*_test.go
+tests/
+temp_test/
+
+# Build artifacts (except the main binary we're building)
+main
+pasargamex
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files
+docker-compose.yml
+dockerfile
+Dockerfile
+
+# Temporary files
+tmp/
+temp/
+
+# API documentation/testing tools
+postman/
+api/
+
+# Python files (for webhook testing)
+*.py
+__pycache__/
+
+# Node modules if any
+node_modules/
+npm-debug.log*
