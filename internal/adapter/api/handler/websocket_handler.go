@@ -42,29 +42,30 @@ func isAllowedOrigin(origin string) bool {
 	// Development: Allow localhost origins and file:// protocol
 	allowedOrigins := []string{
 		"http://localhost:3000",
-		"http://localhost:8080", 
+		"http://localhost:8080",
 		"http://127.0.0.1:8080",
 		"http://localhost:3001", // Additional dev ports
 		"http://127.0.0.1:3000",
+		"http://127.0.0.1:5500",
 		"https://your-domain.com", // Add production domains here
 	}
-	
+
 	// Allow file:// protocol for local HTML files
 	if origin == "" || origin == "null" {
 		return true // Local file access
 	}
-	
+
 	for _, allowed := range allowedOrigins {
 		if origin == allowed {
 			return true
 		}
 	}
-	
+
 	// Additional check for localhost with any port during development
 	if strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") {
 		return true
 	}
-	
+
 	return false
 }
 

@@ -232,4 +232,4 @@ jobs:
         echo ""
         echo "🔗 Test endpoints:"
         echo "Health: $SERVICE_URL/health"
-        echo "Webhook: $SERVICE_URL/v1/payments/webhook"
+        echo "Webhook: $SERVICE_URL/v1/payments/midtrans/callback"

@@ -37,10 +37,10 @@ func NewMidtransPaymentService(serverKey, clientKey string, isProduction bool) *
 
 // MidtransSnapRequest represents Midtrans Snap API request
 type MidtransSnapRequest struct {
-	TransactionDetails TransactionDetails `json:"transaction_details"`
-	CustomerDetails    CustomerDetails    `json:"customer_details"`
+	TransactionDetails TransactionDetails   `json:"transaction_details"`
+	CustomerDetails    CustomerDetails      `json:"customer_details"`
 	ItemDetails        []MidtransItemDetail `json:"item_details"`
-	Callbacks          *Callbacks         `json:"callbacks,omitempty"`
+	Callbacks          *Callbacks           `json:"callbacks,omitempty"`
 }
 
 // MidtransItemDetail represents item detail for Midtrans API
@@ -60,8 +60,8 @@ type TransactionDetails struct {
 
 // Callbacks for Midtrans
 type Callbacks struct {
-	Finish string `json:"finish"`
-	Error  string `json:"error"`
+	Finish  string `json:"finish"`
+	Error   string `json:"error"`
 	Pending string `json:"pending"`
 }
 
@@ -73,7 +73,7 @@ type MidtransSnapResponse struct {
 
 func (mps *MidtransPaymentService) CreatePayment(ctx context.Context, req PaymentGatewayRequest) (*PaymentGatewayResponse, error) {
 	log.Printf("Creating Midtrans payment for order: %s, amount: %.0f", req.OrderID, req.Amount)
-	
+
 	// Debug: Log item details
 	log.Printf("Item details count: %d", len(req.ItemDetails))
 	totalItemsAmount := 0.0
@@ -104,7 +104,7 @@ func (mps *MidtransPaymentService) CreatePayment(ctx context.Context, req Paymen
 		CustomerDetails: req.CustomerDetails,
 		ItemDetails:     midtransItems,
 	}
-	
+
 	// Only add callbacks for redirect mode, not for embed mode
 	if !req.Embed {
 		// Use environment-specific callback URLs - these are called AFTER payment completion
@@ -112,11 +112,17 @@ func (mps *MidtransPaymentService) CreatePayment(ctx context.Context, req Paymen
 		if baseURL == "" {
 			baseURL = "http://localhost:8080" // fallback for local development
 		}
-		
+
+		// For production, use local development URL for frontend since HTML files are not deployed
+		frontendBaseURL := baseURL
+		if os.Getenv("ENVIRONMENT") == "production" {
+			frontendBaseURL = "http://127.0.0.1:5500" // Point back to local for frontend files
+		}
+
 		snapReq.Callbacks = &Callbacks{
-			Finish:  baseURL + "/websocket-chat-pgx/payment-success.html",
-			Error:   baseURL + "/websocket-chat-pgx/payment-error.html", 
-			Pending: baseURL + "/websocket-chat-pgx/payment-pending.html",
+			Finish:  frontendBaseURL + "/websocket-chat-pgx/payment-success.html",
+			Error:   frontendBaseURL + "/websocket-chat-pgx/payment-error.html",
+			Pending: frontendBaseURL + "/websocket-chat-pgx/payment-pending.html",
 		}
 	}
 
@@ -177,7 +183,7 @@ func (mps *MidtransPaymentService) CreatePayment(ctx context.Context, req Paymen
 
 func (mps *MidtransPaymentService) GetPaymentStatus(ctx context.Context, orderID string) (*PaymentGatewayResponse, error) {
 	log.Printf("Getting Midtrans payment status for order: %s", orderID)
-	
+
 	// Debug environment
 	log.Printf("Midtrans environment: sandbox=%t", !mps.isProduction)
 
@@ -186,7 +192,7 @@ func (mps *MidtransPaymentService) GetPaymentStatus(ctx context.Context, orderID
 	if mps.isProduction {
 		statusURL = fmt.Sprintf("https://api.midtrans.com/v2/%s/status", orderID)
 	}
-	
+
 	log.Printf("Status URL: %s", statusURL)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", statusURL, nil)
@@ -214,7 +220,7 @@ func (mps *MidtransPaymentService) GetPaymentStatus(ctx context.Context, orderID
 	}
 
 	log.Printf("Midtrans status API response: Status=%d, Body=%s", resp.StatusCode, string(body))
-	
+
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Midtrans status API error: %s", string(body))
 		return nil, fmt.Errorf("midtrans status API error: %s", string(body))
@@ -229,7 +235,7 @@ func (mps *MidtransPaymentService) GetPaymentStatus(ctx context.Context, orderID
 	// Extract status
 	transactionStatus, _ := statusResp["transaction_status"].(string)
 	paymentType, _ := statusResp["payment_type"].(string)
-	
+
 	log.Printf("Parsed transaction_status: '%s', payment_type: '%s'", transactionStatus, paymentType)
 
 	// Map Midtrans status to our internal status
