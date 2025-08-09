@@ -193,7 +193,7 @@ jobs:
           --min-instances 0 \
           --max-instances 10 \
           --timeout 300 \
-          --set-env-vars="ENVIRONMENT=production,MIDTRANS_ENVIRONMENT=sandbox,FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }},FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }},STORAGE_BUCKET=${{ secrets.GCS_BUCKET_NAME }},MIDTRANS_SERVER_KEY=${{ secrets.MIDTRANS_SERVER_KEY }},MIDTRANS_CLIENT_KEY=${{ secrets.MIDTRANS_CLIENT_KEY }}" \
+          --set-env-vars="ENVIRONMENT=production,BASE_URL=https://pasargamex-api-is3vukc7iq-et.a.run.app,MIDTRANS_ENVIRONMENT=sandbox,FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }},FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }},STORAGE_BUCKET=${{ secrets.GCS_BUCKET_NAME }},MIDTRANS_SERVER_KEY=${{ secrets.MIDTRANS_SERVER_KEY }},MIDTRANS_CLIENT_KEY=${{ secrets.MIDTRANS_CLIENT_KEY }}" \
           --quiet
 
     - name: Update Firebase Service Account JSON separately

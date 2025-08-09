@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"pasargamex/internal/domain/entity"
 	"pasargamex/internal/domain/repository"
 	"pasargamex/internal/domain/service"
+	"pasargamex/internal/infrastructure/websocket"
 	"pasargamex/pkg/errors"
 )
 
@@ -22,6 +24,7 @@ type EnhancedTransactionUseCase struct {
 	paymentGateway  service.PaymentGatewayService
 	chatUseCase     *ChatUseCase
 	walletUseCase   *WalletUseCase
+	wsManager       *websocket.Manager
 }
 
 func NewEnhancedTransactionUseCase(
@@ -31,6 +34,7 @@ func NewEnhancedTransactionUseCase(
 	paymentGateway service.PaymentGatewayService,
 	chatUseCase *ChatUseCase,
 	walletUseCase *WalletUseCase,
+	wsManager *websocket.Manager,
 ) *EnhancedTransactionUseCase {
 	return &EnhancedTransactionUseCase{
 		transactionRepo: transactionRepo,
@@ -40,6 +44,7 @@ func NewEnhancedTransactionUseCase(
 		paymentGateway:  paymentGateway,
 		chatUseCase:     chatUseCase,
 		walletUseCase:   walletUseCase,
+		wsManager:       wsManager,
 	}
 }
 
@@ -447,8 +452,46 @@ func (uc *EnhancedTransactionUseCase) processInstantDeliveryFromWebhook(ctx cont
 
 // notifyPaymentSuccess sends WebSocket notification for successful payment
 func (uc *EnhancedTransactionUseCase) notifyPaymentSuccess(ctx context.Context, transaction *entity.Transaction) {
-	// TODO: Implement WebSocket notification
-	log.Printf("Payment success notification for transaction: %s", transaction.ID)
+	if uc.wsManager == nil {
+		log.Printf("WebSocket manager not available for payment notification")
+		return
+	}
+
+	// Create payment success notification
+	notification := map[string]interface{}{
+		"type": "payment_status_update",
+		"transaction": map[string]interface{}{
+			"id":             transaction.ID,
+			"status":         transaction.Status,
+			"payment_status": transaction.PaymentStatus,
+			"product_id":     transaction.ProductID,
+			"buyer_id":       transaction.BuyerID,
+			"seller_id":      transaction.SellerID,
+			"total_amount":   transaction.TotalAmount,
+			"payment_at":     transaction.PaymentAt,
+		},
+		"message": "🎉 Payment successful! Your order is being processed.",
+		"timestamp": time.Now(),
+	}
+
+	// Send to buyer
+	if notificationJSON, err := json.Marshal(notification); err == nil {
+		log.Printf("Sending payment success notification to buyer: %s", transaction.BuyerID)
+		uc.wsManager.SendToUser(transaction.BuyerID, notificationJSON)
+	}
+
+	// Send notification to seller as well  
+	sellerNotification := make(map[string]interface{})
+	for k, v := range notification {
+		sellerNotification[k] = v
+	}
+	sellerNotification["message"] = "💰 Payment received! Order ready for delivery."
+	if sellerNotificationJSON, err := json.Marshal(sellerNotification); err == nil {
+		log.Printf("Sending payment notification to seller: %s", transaction.SellerID)
+		uc.wsManager.SendToUser(transaction.SellerID, sellerNotificationJSON)
+	}
+
+	log.Printf("Payment success notification sent for transaction: %s", transaction.ID)
 }
 
 // notifyPaymentFailure sends WebSocket notification for failed payment

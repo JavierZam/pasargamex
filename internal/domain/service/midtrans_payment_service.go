@@ -107,16 +107,16 @@ func (mps *MidtransPaymentService) CreatePayment(ctx context.Context, req Paymen
 	
 	// Only add callbacks for redirect mode, not for embed mode
 	if !req.Embed {
-		// Use environment-specific callback URLs
+		// Use environment-specific callback URLs - these are called AFTER payment completion
 		baseURL := os.Getenv("BASE_URL")
 		if baseURL == "" {
 			baseURL = "http://localhost:8080" // fallback for local development
 		}
 		
 		snapReq.Callbacks = &Callbacks{
-			Finish:  baseURL + "/websocket-chat-pgx/modern-chat-test.html?payment=success",
-			Error:   baseURL + "/websocket-chat-pgx/modern-chat-test.html?payment=error", 
-			Pending: baseURL + "/websocket-chat-pgx/modern-chat-test.html?payment=pending",
+			Finish:  baseURL + "/websocket-chat-pgx/payment-success.html",
+			Error:   baseURL + "/websocket-chat-pgx/payment-error.html", 
+			Pending: baseURL + "/websocket-chat-pgx/payment-pending.html",
 		}
 	}
 

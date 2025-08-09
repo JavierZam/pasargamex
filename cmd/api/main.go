@@ -143,6 +143,7 @@ func main() {
 		paymentService, 
 		chatUseCase, 
 		walletUseCase,
+		wsManager,
 	)
 
 	// Escrow manager for credentials and auto-release
