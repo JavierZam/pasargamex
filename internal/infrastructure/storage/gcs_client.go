@@ -27,10 +27,13 @@ func NewCloudStorageClient(ctx context.Context, bucketName, projectID string, cr
 	// Try to get service account from environment variable first (for production)
 	if credentialsJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON"); credentialsJSON != "" {
 		opts = append(opts, option.WithCredentialsJSON([]byte(credentialsJSON)))
-	} else if credentialsPath != "" {
-		// Fallback to file path (for local development)
-		opts = append(opts, option.WithCredentialsFile(credentialsPath))
+	} else if credentialsPath != "" && credentialsPath != "./pasargamex-458303-firebase-adminsdk-fbsvc-f079266cd9.json" {
+		// Only use file path if it's not the default hardcoded path and file exists
+		if _, err := os.Stat(credentialsPath); err == nil {
+			opts = append(opts, option.WithCredentialsFile(credentialsPath))
+		}
 	}
+	// If no explicit credentials, let Google Cloud use default credentials (ADC)
 
 	client, err := storage.NewClient(ctx, opts...)
 	if err != nil {
