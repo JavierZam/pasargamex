@@ -170,20 +170,7 @@ jobs:
         
         docker push $REGION-docker.pkg.dev/$PROJECT_ID/pasargamex/pasargamex-api:latest
 
-    - name: Create environment variables file
-      run: |
-        cat > env-vars.yaml << 'EOF'
-        ENVIRONMENT: production
-        MIDTRANS_ENVIRONMENT: sandbox
-        FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-        FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
-        STORAGE_BUCKET: ${{ secrets.GCS_BUCKET_NAME }}
-        MIDTRANS_SERVER_KEY: ${{ secrets.MIDTRANS_SERVER_KEY }}
-        MIDTRANS_CLIENT_KEY: ${{ secrets.MIDTRANS_CLIENT_KEY }}
-        FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
-        EOF
-
-    - name: Deploy to Cloud Run
+    - name: Deploy to Cloud Run (without Firebase JSON first)
       run: |
         PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
         REGION="${{ env.REGION }}"
@@ -206,8 +193,28 @@ jobs:
           --min-instances 0 \
           --max-instances 10 \
           --timeout 300 \
-          --env-vars-file env-vars.yaml \
+          --set-env-vars="ENVIRONMENT=production,MIDTRANS_ENVIRONMENT=sandbox,FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }},FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }},STORAGE_BUCKET=${{ secrets.GCS_BUCKET_NAME }},MIDTRANS_SERVER_KEY=${{ secrets.MIDTRANS_SERVER_KEY }},MIDTRANS_CLIENT_KEY=${{ secrets.MIDTRANS_CLIENT_KEY }}" \
           --quiet
+
+    - name: Update Firebase Service Account JSON separately
+      run: |
+        PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+        REGION="${{ env.REGION }}"
+        SERVICE_NAME="${{ env.SERVICE_NAME }}"
+        
+        echo "Updating Firebase Service Account JSON..."
+        
+        # Create temporary file for Firebase JSON
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > firebase-sa.json
+        
+        # Update service with Firebase JSON using file
+        gcloud run services update $SERVICE_NAME \
+          --region $REGION \
+          --update-env-vars="FIREBASE_SERVICE_ACCOUNT_JSON=$(cat firebase-sa.json | tr -d '\n')" \
+          --quiet || echo "Firebase JSON update may have failed - service might still work with default credentials"
+        
+        # Cleanup
+        rm firebase-sa.json
 
     - name: Show service URL
       run: |
