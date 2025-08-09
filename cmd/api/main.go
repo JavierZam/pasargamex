@@ -50,11 +50,13 @@ func main() {
 		}
 
 		if _, err := os.Stat(serviceAccountPath); os.IsNotExist(err) {
-			log.Fatalf("Service account file does not exist: %s", serviceAccountPath)
+			log.Printf("WARNING: Service account file does not exist: %s", serviceAccountPath)
+			log.Printf("Using default credentials instead")
+			opt = option.WithCredentialsFile("") // Use default credentials
+		} else {
+			log.Printf("Using Firebase service account from file: %s", serviceAccountPath)
+			opt = option.WithCredentialsFile(serviceAccountPath)
 		}
-		
-		log.Printf("Using Firebase service account from file: %s", serviceAccountPath)
-		opt = option.WithCredentialsFile(serviceAccountPath)
 	}
 
 	firebaseApp, err := fbapp.NewApp(ctx, &fbapp.Config{ProjectID: cfg.FirebaseProject}, opt)
