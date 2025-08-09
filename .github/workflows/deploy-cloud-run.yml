@@ -2,33 +2,28 @@ name: Deploy to Google Cloud Run
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
-    branches:
-      - main
+    branches: [ main ]
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   SERVICE_NAME: pasargamex-api
-  REGION: asia-southeast2  # Jakarta region for Indonesian market
-  ARTIFACT_REGISTRY_REGION: asia-southeast2
-  IMAGE_NAME: asia-southeast2-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/pasargamex/pasargamex-api
+  REGION: asia-southeast2
 
 jobs:
   test:
-    name: Run Tests
     runs-on: ubuntu-latest
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
         go-version: '1.22.4'
-        
+
     - name: Cache Go modules
       uses: actions/cache@v3
       with:
@@ -36,155 +31,188 @@ jobs:
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
         restore-keys: |
           ${{ runner.os }}-go-
-          
+
     - name: Download dependencies
       run: go mod download
-      
-    - name: Run tests
-      run: go test -v ./...
-      
-    - name: Run go vet
-      run: go vet ./...
-      
+
+    - name: Check code formatting
+      run: |
+        unformatted=$(gofmt -l .)
+        if [ -n "$unformatted" ]; then
+          echo "❌ Code not formatted. Files:"
+          echo "$unformatted"
+          exit 1
+        fi
+        echo "✅ Code formatting OK"
+
+    - name: Run linting
+      run: |
+        echo "🔍 Running Go vet..."
+        go vet ./...
+        echo "✅ Go vet passed"
+
+    - name: Run unit tests
+      run: |
+        echo "🧪 Running unit tests..."
+        go test -v -timeout=120s ./...
+      env:
+        CGO_ENABLED: 0
+
     - name: Build application
       run: go build -v ./cmd/api/main.go
 
   build-and-deploy:
-    name: Build and Deploy to Cloud Run
-    runs-on: ubuntu-latest
     needs: test
+    runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
+    - name: Validate secrets
+      run: |
+        if [ -z "${{ secrets.GCP_PROJECT_ID }}" ]; then
+          echo "❌ GCP_PROJECT_ID secret is not set"
+          exit 1
+        fi
+        if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then
+          echo "❌ GCP_SA_KEY secret is not set"
+          exit 1
+        fi
+        echo "✅ Required secrets are set"
+        echo "Project ID: ${{ secrets.GCP_PROJECT_ID }}"
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
     - name: Set up Google Cloud CLI
       uses: google-github-actions/setup-gcloud@v1
-      with:
-        service_account_key: ${{ secrets.GCP_SA_KEY }}
-        project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+    - name: Configure gcloud project
+      run: |
+        gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
+        
+    - name: Verify authentication
+      run: |
+        echo "Verifying GCP authentication..."
+        gcloud auth list
+        gcloud config get-value project
+        
+        echo "Enabling required APIs..."
+        gcloud services enable cloudresourcemanager.googleapis.com --project=${{ secrets.GCP_PROJECT_ID }} --quiet || echo "Resource Manager API enable attempted"
+        gcloud services enable artifactregistry.googleapis.com --project=${{ secrets.GCP_PROJECT_ID }} --quiet || echo "Artifact Registry API enable attempted"
+        gcloud services enable run.googleapis.com --project=${{ secrets.GCP_PROJECT_ID }} --quiet || echo "Cloud Run API enable attempted"
+        
+        echo "✅ Authentication verified and APIs enabled"
         
     - name: Configure Docker for Artifact Registry
       run: |
-        gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://asia-southeast2-docker.pkg.dev
-      
+        echo "Configuring Docker authentication for Artifact Registry..."
+        
+        # Configure docker credential helper
+        gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+        
+        # Alternative: Use gcloud as Docker credential helper directly
+        gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://${{ env.REGION }}-docker.pkg.dev
+        
+        echo "✅ Docker authentication configured"
+        
+    - name: Setup Artifact Registry repository
+      run: |
+        echo "Setting up Artifact Registry repository..."
+        echo "Project: ${{ secrets.GCP_PROJECT_ID }}"
+        echo "Region: ${{ env.REGION }}"
+        
+        # Create repository if it doesn't exist (this will fail silently if exists)
+        gcloud artifacts repositories create pasargamex \
+          --repository-format=docker \
+          --location=${{ env.REGION }} \
+          --description="Docker repository for Pasargamex API" \
+          --project=${{ secrets.GCP_PROJECT_ID }} \
+          --quiet 2>/dev/null || echo "Repository exists or creation attempted"
+        
+        echo "✅ Artifact Registry repository ready"
+
     - name: Build Docker image
       run: |
-        docker build -t $IMAGE_NAME:$GITHUB_SHA \
-                     -t $IMAGE_NAME:latest \
-                     -f dockerfile .
-                     
-    - name: Push Docker image to Container Registry
-      run: |
-        docker push $IMAGE_NAME:$GITHUB_SHA
-        docker push $IMAGE_NAME:latest
+        PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+        REGION="${{ env.REGION }}"
+        IMAGE_TAG="${{ github.sha }}"
         
+        echo "Building Docker image..."
+        echo "Project ID: $PROJECT_ID"
+        echo "Region: $REGION"
+        echo "Image tag: $IMAGE_TAG"
+        
+        docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/pasargamex/pasargamex-api:$IMAGE_TAG -f dockerfile .
+        docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/pasargamex/pasargamex-api:latest -f dockerfile .
+
+    - name: Push Docker image
+      run: |
+        PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+        REGION="${{ env.REGION }}"
+        IMAGE_TAG="${{ github.sha }}"
+        
+        echo "Pushing Docker images..."
+        echo "Registry: $REGION-docker.pkg.dev/$PROJECT_ID/pasargamex/pasargamex-api"
+        
+        # Push with error handling
+        if ! docker push $REGION-docker.pkg.dev/$PROJECT_ID/pasargamex/pasargamex-api:$IMAGE_TAG; then
+          echo "❌ Failed to push image. Checking permissions..."
+          echo "Current authenticated account:"
+          gcloud auth list --filter=status:ACTIVE --format="value(account)"
+          echo "Project: $PROJECT_ID"
+          echo "Required permissions:"
+          echo "  - artifactregistry.repositories.uploadArtifacts"
+          echo "  - artifactregistry.repositories.get"
+          echo "Please ensure the service account has 'Artifact Registry Writer' role"
+          exit 1
+        fi
+        
+        docker push $REGION-docker.pkg.dev/$PROJECT_ID/pasargamex/pasargamex-api:latest
+
     - name: Deploy to Cloud Run
       run: |
-        gcloud run deploy $SERVICE_NAME \
-          --image=$IMAGE_NAME:$GITHUB_SHA \
-          --platform=managed \
-          --region=$REGION \
-          --allow-unauthenticated \
-          --port=8080 \
-          --memory=1Gi \
-          --cpu=1 \
-          --min-instances=0 \
-          --max-instances=10 \
-          --concurrency=80 \
-          --timeout=3600 \
-          --set-env-vars="PORT=8080" \
-          --set-env-vars="ENVIRONMENT=production" \
-          --set-env-vars="MIDTRANS_ENVIRONMENT=production" \
-          --set-env-vars="FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" \
-          --set-env-vars="FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}" \
-          --set-env-vars="STORAGE_BUCKET=${{ secrets.GCS_BUCKET_NAME }}" \
-          --set-env-vars="MIDTRANS_SERVER_KEY=${{ secrets.MIDTRANS_SERVER_KEY }}" \
-          --set-env-vars="MIDTRANS_CLIENT_KEY=${{ secrets.MIDTRANS_CLIENT_KEY }}" \
-          --set-env-vars="FIREBASE_SERVICE_ACCOUNT_JSON=${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}" \
-          --set-env-vars="BASE_URL=${{ secrets.PRODUCTION_BASE_URL }}"
-          
-    - name: Update webhook URLs for production
-      run: |
-        echo "Deployment completed successfully!"
-        echo "Service URL: $(gcloud run services describe $SERVICE_NAME --region=$REGION --format='value(status.url)')"
-        echo "Remember to update Midtrans webhook URLs to point to the production domain"
+        PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+        REGION="${{ env.REGION }}"
+        SERVICE_NAME="${{ env.SERVICE_NAME }}"
+        IMAGE_TAG="${{ github.sha }}"
         
-    - name: Show deployment info
-      run: |
-        echo "=== Deployment Summary ==="
-        echo "Project: $PROJECT_ID"
+        echo "Deploying to Cloud Run..."
         echo "Service: $SERVICE_NAME"
         echo "Region: $REGION"
-        echo "Image: $IMAGE_NAME:$GITHUB_SHA"
-        echo "=========================="
-
-  preview-deploy:
-    name: Preview Deployment (PR)
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name == 'pull_request'
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Set up Google Cloud CLI
-      uses: google-github-actions/setup-gcloud@v1
-      with:
-        service_account_key: ${{ secrets.GCP_SA_KEY }}
-        project_id: ${{ secrets.GCP_PROJECT_ID }}
+        echo "Image: $REGION-docker.pkg.dev/$PROJECT_ID/pasargamex/pasargamex-api:$IMAGE_TAG"
         
-    - name: Configure Docker for Artifact Registry
-      run: |
-        gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://asia-southeast2-docker.pkg.dev
-      
-    - name: Build Docker image for preview
-      run: |
-        docker build -t $IMAGE_NAME:pr-${{ github.event.number }} \
-                     -f dockerfile .
-                     
-    - name: Push preview image
-      run: |
-        docker push $IMAGE_NAME:pr-${{ github.event.number }}
-        
-    - name: Deploy preview service
-      run: |
-        gcloud run deploy $SERVICE_NAME-pr-${{ github.event.number }} \
-          --image=$IMAGE_NAME:pr-${{ github.event.number }} \
-          --platform=managed \
-          --region=$REGION \
+        gcloud run deploy $SERVICE_NAME \
+          --image $REGION-docker.pkg.dev/$PROJECT_ID/pasargamex/pasargamex-api:$IMAGE_TAG \
+          --region $REGION \
+          --platform managed \
           --allow-unauthenticated \
-          --port=8080 \
-          --memory=512Mi \
-          --cpu=1 \
-          --min-instances=0 \
-          --max-instances=2 \
-          --set-env-vars="PORT=8080" \
-          --set-env-vars="ENVIRONMENT=staging" \
-          --set-env-vars="MIDTRANS_ENVIRONMENT=sandbox" \
-          --set-env-vars="FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" \
-          --set-env-vars="FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}" \
-          --set-env-vars="STORAGE_BUCKET=${{ secrets.GCS_BUCKET_NAME }}" \
-          --set-env-vars="MIDTRANS_SERVER_KEY=${{ secrets.MIDTRANS_SANDBOX_SERVER_KEY }}" \
-          --set-env-vars="MIDTRANS_CLIENT_KEY=${{ secrets.MIDTRANS_SANDBOX_CLIENT_KEY }}"
-          
-    - name: Comment PR with preview URL
-      uses: actions/github-script@v6
-      with:
-        script: |
-          const serviceName = '${{ env.SERVICE_NAME }}-pr-${{ github.event.number }}';
-          const region = '${{ env.REGION }}';
-          const projectId = '${{ secrets.GCP_PROJECT_ID }}';
-          const previewUrl = `https://${serviceName}-${projectId}.a.run.app`;
-          
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: `🚀 **Preview Deployment Ready!**\n\n` +
-                  `Preview URL: ${previewUrl}\n` +
-                  `Environment: Staging (Midtrans Sandbox)\n\n` +
-                  `This preview will be automatically cleaned up when the PR is closed.`
-          });
+          --memory 1Gi \
+          --cpu 1 \
+          --port 8080 \
+          --min-instances 0 \
+          --max-instances 10 \
+          --set-env-vars="ENVIRONMENT=production,MIDTRANS_ENVIRONMENT=sandbox,FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }},FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }},STORAGE_BUCKET=${{ secrets.GCS_BUCKET_NAME }},MIDTRANS_SERVER_KEY=${{ secrets.MIDTRANS_SERVER_KEY }},MIDTRANS_CLIENT_KEY=${{ secrets.MIDTRANS_CLIENT_KEY }}" \
+          --quiet
+
+    - name: Show service URL
+      run: |
+        SERVICE_NAME="${{ env.SERVICE_NAME }}"
+        REGION="${{ env.REGION }}"
+        
+        echo "Getting service URL..."
+        SERVICE_URL=$(gcloud run services describe $SERVICE_NAME \
+          --region $REGION \
+          --format 'value(status.url)')
+        
+        echo "🚀 Service deployed successfully!"
+        echo "📍 Service URL: $SERVICE_URL"
+        echo "🌍 Region: $REGION"
+        echo ""
+        echo "🔗 Test endpoints:"
+        echo "Health: $SERVICE_URL/health"
+        echo "Webhook: $SERVICE_URL/v1/payments/webhook"
