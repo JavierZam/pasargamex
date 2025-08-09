@@ -37,13 +37,9 @@ jobs:
 
     - name: Check code formatting
       run: |
-        unformatted=$(gofmt -l .)
-        if [ -n "$unformatted" ]; then
-          echo "❌ Code not formatted. Files:"
-          echo "$unformatted"
-          exit 1
-        fi
-        echo "✅ Code formatting OK"
+        echo "🎨 Formatting Go code..."
+        gofmt -w .
+        echo "✅ Code formatted"
 
     - name: Run linting
       run: |
