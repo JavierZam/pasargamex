@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -105,11 +106,22 @@ func (h *PaymentHandler) MidtransCallback(c echo.Context) error {
 	log.Printf("Midtrans webhook: OrderID=%s, Status=%s, PaymentType=%s, FraudStatus=%s", 
 		orderID, transactionStatus, paymentType, fraudStatus)
 
-	// Verify webhook authenticity (security best practice)
+	// CRITICAL: Always verify webhook authenticity - no bypass allowed
 	if err := h.verifyMidtransSignature(c, notification); err != nil {
-		log.Printf("Midtrans webhook signature verification failed: %v", err)
+		log.Printf("SECURITY ALERT: Midtrans webhook signature verification failed from IP %s: %v", c.RealIP(), err)
+		// Log potential attack attempt
+		h.logSecurityEvent(c.RealIP(), "webhook_signature_fail", notification)
 		return c.JSON(http.StatusUnauthorized, map[string]string{
 			"status": "UNAUTHORIZED",
+		})
+	}
+	
+	// CRITICAL: Prevent replay attacks with timestamp validation
+	if err := h.validateWebhookTimestamp(notification); err != nil {
+		log.Printf("SECURITY ALERT: Webhook replay attack detected from IP %s: %v", c.RealIP(), err)
+		h.logSecurityEvent(c.RealIP(), "webhook_replay_attack", notification)
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"status": "REPLAY_DETECTED",
 		})
 	}
 
@@ -212,12 +224,9 @@ func (h *PaymentHandler) verifyMidtransSignature(c echo.Context, notification ma
 		signatureKey = sig
 	} else {
 		// For sandbox environment, signature might not be present
-		environment := os.Getenv("MIDTRANS_ENVIRONMENT")
-		if environment == "sandbox" {
-			log.Printf("Signature not found but running in sandbox mode, allowing webhook")
-			return nil
-		}
-		return fmt.Errorf("no signature found in webhook")
+		// SECURITY: No signature bypass - even in sandbox mode
+		log.Printf("CRITICAL: No signature found in webhook - always required for security")
+		return fmt.Errorf("no signature found in webhook - signature required for all environments")
 	}
 
 	// Extract required fields for signature verification
@@ -238,15 +247,44 @@ func (h *PaymentHandler) verifyMidtransSignature(c echo.Context, notification ma
 	expectedSignature := hex.EncodeToString(hash[:])
 	
 	if signatureKey != expectedSignature {
-		environment := os.Getenv("MIDTRANS_ENVIRONMENT")
-		if environment == "sandbox" {
-			log.Printf("Signature mismatch in sandbox mode, but allowing webhook to proceed")
-			log.Printf("Expected: %s, Got: %s", expectedSignature, signatureKey)
-			return nil
-		}
-		return fmt.Errorf("signature verification failed")
+		// SECURITY: Never bypass signature verification - this prevents fake webhooks  
+		log.Printf("CRITICAL SECURITY: Signature verification failed")
+		log.Printf("Expected: %s, Got: %s", expectedSignature, signatureKey)
+		return fmt.Errorf("signature verification failed - potential webhook forgery attempt")
 	}
 	
 	log.Printf("Webhook signature verified successfully for order: %s", orderID)
 	return nil
+}
+
+// validateWebhookTimestamp prevents replay attacks by checking timestamp
+func (h *PaymentHandler) validateWebhookTimestamp(notification map[string]interface{}) error {
+	// For Midtrans, check if transaction_time is not too old (prevent replay)
+	transactionTime, ok := notification["transaction_time"].(string)
+	if !ok || transactionTime == "" {
+		return fmt.Errorf("no transaction_time found in webhook")
+	}
+	
+	// Parse transaction time
+	parsedTime, err := time.Parse("2006-01-02 15:04:05", transactionTime)
+	if err != nil {
+		return fmt.Errorf("invalid transaction_time format: %v", err)
+	}
+	
+	// Check if webhook is too old (prevent replay attacks)
+	maxAge := 30 * time.Minute // Allow max 30 minutes old webhooks
+	if time.Since(parsedTime) > maxAge {
+		return fmt.Errorf("webhook too old - potential replay attack")
+	}
+	
+	return nil
+}
+
+// logSecurityEvent logs potential security incidents
+func (h *PaymentHandler) logSecurityEvent(ip, eventType string, data map[string]interface{}) {
+	// In production, this should log to a security monitoring system
+	log.Printf("SECURITY EVENT: Type=%s, IP=%s, OrderID=%v", eventType, ip, data["order_id"])
+	
+	// TODO: Implement rate limiting based on IP
+	// TODO: Send alerts to security team for critical events
 }

@@ -9,7 +9,7 @@ type Transaction struct {
 	ProductID      string                 `json:"product_id" firestore:"productId"`
 	SellerID       string                 `json:"seller_id" firestore:"sellerId"`
 	BuyerID        string                 `json:"buyer_id" firestore:"buyerId"`
-	Status         string                 `json:"status" firestore:"status"`
+	Status         string                 `json:"status" firestore:"status"` // payment_pending, payment_processing, credentials_delivered, completed, disputed, refunded, cancelled
 	DeliveryMethod string                 `json:"delivery_method" firestore:"deliveryMethod"`
 	Amount         float64                `json:"amount" firestore:"amount"`
 	Fee            float64                `json:"fee" firestore:"fee"`
@@ -46,6 +46,23 @@ type Transaction struct {
 
 	SellerReviewed bool `json:"seller_reviewed" firestore:"sellerReviewed"`
 	BuyerReviewed  bool `json:"buyer_reviewed" firestore:"buyerReviewed"`
+	
+	// Dispute Management
+	IsDisputed           bool       `json:"is_disputed" firestore:"isDisputed"`
+	DisputeID            string     `json:"dispute_id,omitempty" firestore:"disputeId,omitempty"`
+	DisputeCreatedAt     *time.Time `json:"dispute_created_at,omitempty" firestore:"disputeCreatedAt,omitempty"`
+	DisputeStatus        string     `json:"dispute_status,omitempty" firestore:"disputeStatus,omitempty"`
+	
+	// Security & Monitoring
+	CredentialsAccessed  bool       `json:"credentials_accessed" firestore:"credentialsAccessed"`
+	CredentialsAccessedAt *time.Time `json:"credentials_accessed_at,omitempty" firestore:"credentialsAccessedAt,omitempty"`
+	FraudScore          float64    `json:"fraud_score" firestore:"fraudScore"`
+	SecurityFlags       []string   `json:"security_flags,omitempty" firestore:"securityFlags,omitempty"`
+	
+	// Refund Management
+	RefundAmount         float64    `json:"refund_amount,omitempty" firestore:"refundAmount,omitempty"`
+	RefundReason         string     `json:"refund_reason,omitempty" firestore:"refundReason,omitempty"`
+	RefundProcessedAt    *time.Time `json:"refund_processed_at,omitempty" firestore:"refundProcessedAt,omitempty"`
 
 	Notes              string `json:"notes,omitempty" firestore:"notes,omitempty"`
 	CancellationReason string `json:"cancellation_reason,omitempty" firestore:"cancellationReason,omitempty"`

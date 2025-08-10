@@ -21,6 +21,8 @@ type Product struct {
 	Attributes  map[string]interface{} `json:"attributes" firestore:"attributes"`
 	Images      []ProductImage         `json:"images" firestore:"images"`
 	Status      string                 `json:"status" firestore:"status"`
+	Stock       int                    `json:"stock" firestore:"stock"`
+	SoldCount   int                    `json:"sold_count" firestore:"soldCount"`
 
 	DeliveryMethod       string                 `json:"delivery_method" firestore:"deliveryMethod"`
 	Credentials          map[string]interface{} `json:"credentials,omitempty" firestore:"credentials,omitempty"`

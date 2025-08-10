@@ -81,7 +81,7 @@ func (uc *EnhancedTransactionUseCase) CreateSecureTransaction(ctx context.Contex
 		return nil, err
 	}
 
-	_, err = uc.userRepo.GetByID(ctx, buyerID)
+	buyer, err := uc.userRepo.GetByID(ctx, buyerID)
 	if err != nil {
 		return nil, err
 	}
@@ -99,16 +99,66 @@ func (uc *EnhancedTransactionUseCase) CreateSecureTransaction(ctx context.Contex
 		return nil, errors.BadRequest("Seller is not verified", nil)
 	}
 
-	// Check if buyer already has completed transaction for this product
-	hasCompleted, err := uc.transactionRepo.HasCompletedTransaction(ctx, buyerID, input.ProductID)
-	if err != nil {
-		log.Printf("Error checking completed transaction: %v", err)
-	} else if hasCompleted {
-		return nil, errors.BadRequest("You have already purchased this product", nil)
+	// CRITICAL: Check product stock availability with race condition protection
+	// For single-use products (like game accounts), treat stock as 1 if not set
+	maxStock := product.Stock
+	if maxStock == 0 && len(product.Credentials) > 0 {
+		maxStock = 1 // Single-use product with credentials
+	}
+	
+	if maxStock > 0 {
+		// Check if product is already sold out
+		if product.SoldCount >= maxStock {
+			return nil, errors.BadRequest("Product is sold out", nil)
+		}
+		
+		// Additional check: count pending + completed transactions to prevent overselling
+		pendingCount, err := uc.transactionRepo.GetPendingTransactionCount(ctx, input.ProductID)
+		if err != nil {
+			log.Printf("Error checking pending transaction count: %v", err)
+		} else {
+			totalReserved := product.SoldCount + pendingCount
+			if totalReserved >= maxStock {
+				return nil, errors.BadRequest("Product is sold out (reserved)", nil)
+			}
+		}
 	}
 
 	if input.DeliveryMethod != "instant" && input.DeliveryMethod != "middleman" {
 		return nil, errors.BadRequest("Invalid delivery method", nil)
+	}
+
+	// FRAUD DETECTION: Analyze transaction for fraud risk
+	fraudUseCase := NewFraudDetectionUseCase(uc.transactionRepo, uc.userRepo)
+	
+	// Create temporary transaction for fraud analysis (after price calculation)
+	fee := uc.feeCalculator.CalculateFee(product.Price, input.PaymentMethod)
+	totalAmount := product.Price + fee
+	
+	tempTransaction := &entity.Transaction{
+		ProductID:   input.ProductID,
+		BuyerID:     buyerID,
+		SellerID:    product.SellerID,
+		TotalAmount: totalAmount,
+	}
+	
+	fraudResult, err := fraudUseCase.AnalyzeTransaction(ctx, tempTransaction, buyer, seller, product)
+	if err != nil {
+		log.Printf("Fraud analysis failed: %v", err)
+		// Continue with transaction but log the error
+	} else {
+		log.Printf("Fraud analysis result: Score=%.2f, Risk=%s, Action=%s", 
+			fraudResult.Score, fraudResult.RiskLevel, fraudResult.Action)
+			
+		// Block high-risk transactions
+		if fraudResult.Action == "block" {
+			return nil, errors.BadRequest("Transaction blocked for security reasons. Please contact support.", nil)
+		}
+		
+		// Flag for review but allow to proceed
+		if fraudResult.Action == "review" {
+			log.Printf("SECURITY: Transaction %s flagged for review: %v", tempTransaction.ID, fraudResult.Reasons)
+		}
 	}
 
 	if input.DeliveryMethod == "instant" && len(product.Credentials) == 0 {
@@ -118,10 +168,6 @@ func (uc *EnhancedTransactionUseCase) CreateSecureTransaction(ctx context.Contex
 	if input.DeliveryMethod == "middleman" && input.MiddlemanID == "" {
 		return nil, errors.BadRequest("Middleman ID is required for middleman delivery", nil)
 	}
-
-	// 3. Calculate fees and amounts
-	fee := uc.feeCalculator.CalculateFee(product.Price, input.PaymentMethod)
-	totalAmount := product.Price + fee
 
 	// 4. Create transaction with security fields
 	transactionID := uc.generateID()
@@ -140,6 +186,9 @@ func (uc *EnhancedTransactionUseCase) CreateSecureTransaction(ctx context.Contex
 		PaymentMethod:  input.PaymentMethod,
 		PaymentStatus:  "pending",
 		AdminID:        input.MiddlemanID,
+		// Add fraud analysis results if available
+		FraudScore:     0.0,
+		SecurityFlags:  []string{},
 		
 		// Midtrans fields
 		MidtransOrderID: midtransOrderID,
@@ -152,6 +201,12 @@ func (uc *EnhancedTransactionUseCase) CreateSecureTransaction(ctx context.Contex
 		Notes:     input.Notes,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+	}
+	
+	// Update fraud analysis results before saving
+	if fraudResult != nil {
+		transaction.FraudScore = fraudResult.Score
+		transaction.SecurityFlags = fraudResult.Flags
 	}
 
 	// 5. Save transaction
@@ -442,6 +497,24 @@ func (uc *EnhancedTransactionUseCase) processInstantDeliveryFromWebhook(ctx cont
 	if err := uc.transactionRepo.Update(ctx, transaction); err != nil {
 		log.Printf("Failed to update transaction after delivery: %v", err)
 		return
+	}
+	
+	// Update product sold count and status
+	product.SoldCount++
+	
+	// Update product status based on stock
+	if product.Stock > 0 && product.SoldCount >= product.Stock {
+		product.Status = "sold_out"
+		log.Printf("Product %s is now sold out (%d/%d)", product.ID, product.SoldCount, product.Stock)
+	} else if product.Stock == 0 && len(product.Credentials) > 0 {
+		// Single-use product with credentials - mark as sold
+		product.Status = "sold"
+		log.Printf("Single-use product %s is now sold", product.ID)
+	}
+	
+	if err := uc.productRepo.Update(ctx, product); err != nil {
+		log.Printf("Failed to update product status and sold count: %v", err)
+		// Don't return error, transaction is still successful
 	}
 
 	// Send credentials via chat

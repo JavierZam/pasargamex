@@ -19,6 +19,8 @@ type TransactionRepository interface {
 
 	GetTransactionStats(ctx context.Context, userID string, period string) (map[string]interface{}, error)
 	HasCompletedTransaction(ctx context.Context, userID, productID string) (bool, error)
+	GetCompletedTransactionCount(ctx context.Context, productID string) (int, error)
+	GetPendingTransactionCount(ctx context.Context, productID string) (int, error)
 	
 	// Midtrans Integration Methods
 	GetByMidtransOrderID(ctx context.Context, midtransOrderID string) (*entity.Transaction, error)

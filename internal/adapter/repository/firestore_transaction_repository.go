@@ -29,6 +29,8 @@ type TransactionRepository interface {
 
 	GetTransactionStats(ctx context.Context, userID string, period string) (map[string]interface{}, error)
 	HasCompletedTransaction(ctx context.Context, userID, productID string) (bool, error)
+	GetCompletedTransactionCount(ctx context.Context, productID string) (int, error)
+	GetPendingTransactionCount(ctx context.Context, productID string) (int, error)
 	
 	// Midtrans Integration Methods
 	GetByMidtransOrderID(ctx context.Context, midtransOrderID string) (*entity.Transaction, error)
@@ -313,11 +315,35 @@ func (r *firestoreTransactionRepository) GetTransactionStats(ctx context.Context
 func (r *firestoreTransactionRepository) HasCompletedTransaction(ctx context.Context, userID, productID string) (bool, error) {
 	log.Printf("Checking if user %s has completed transaction for product %s", userID, productID)
 
+	// Debug: First check ALL transactions for this user+product combination
+	debugQuery := r.client.Collection("transactions").
+		Where("buyerId", "==", userID).
+		Where("productId", "==", productID)
+	
+	debugIter := debugQuery.Documents(ctx)
+	log.Printf("DEBUG: All transactions for user %s + product %s:", userID, productID)
+	for {
+		debugDoc, err := debugIter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			log.Printf("DEBUG: Error reading transaction: %v", err)
+			break
+		}
+		var debugTx entity.Transaction
+		if err := debugDoc.DataTo(&debugTx); err == nil {
+			log.Printf("DEBUG: Transaction ID=%s, PaymentStatus=%s, CredentialsDelivered=%v, Status=%s, CreatedAt=%v", 
+				debugDoc.Ref.ID, debugTx.PaymentStatus, debugTx.CredentialsDelivered, debugTx.Status, debugTx.CreatedAt)
+		}
+	}
+
 	query := r.client.Collection("transactions").
 		Where("buyerId", "==", userID).
 		Where("productId", "==", productID).
 		Where("paymentStatus", "in", []string{"success", "paid"}).
 		Where("credentialsDelivered", "==", true).
+		Where("status", "==", "credentials_delivered").
 		Limit(1)
 
 	iter := query.Documents(ctx)
@@ -332,8 +358,54 @@ func (r *firestoreTransactionRepository) HasCompletedTransaction(ctx context.Con
 		return false, err
 	}
 
-	log.Printf("Completed transaction found: %v", doc.Ref.ID)
+	// Debug: log the actual transaction data that was found
+	var transaction entity.Transaction
+	if err := doc.DataTo(&transaction); err == nil {
+		log.Printf("Completed transaction found: ID=%s, PaymentStatus=%s, CredentialsDelivered=%v, CreatedAt=%v", 
+			doc.Ref.ID, transaction.PaymentStatus, transaction.CredentialsDelivered, transaction.CreatedAt)
+	} else {
+		log.Printf("Completed transaction found: %v (failed to parse data: %v)", doc.Ref.ID, err)
+	}
 	return true, nil
+}
+
+func (r *firestoreTransactionRepository) GetCompletedTransactionCount(ctx context.Context, productID string) (int, error) {
+	log.Printf("Getting completed transaction count for product %s", productID)
+	
+	query := r.client.Collection("transactions").
+		Where("productId", "==", productID).
+		Where("paymentStatus", "in", []string{"success", "paid"}).
+		Where("credentialsDelivered", "==", true).
+		Where("status", "==", "credentials_delivered")
+	
+	docs, err := query.Documents(ctx).GetAll()
+	if err != nil {
+		log.Printf("Error getting completed transaction count: %v", err)
+		return 0, err
+	}
+	
+	count := len(docs)
+	log.Printf("Found %d completed transactions for product %s", count, productID)
+	return count, nil
+}
+
+func (r *firestoreTransactionRepository) GetPendingTransactionCount(ctx context.Context, productID string) (int, error) {
+	log.Printf("Getting pending transaction count for product %s", productID)
+	
+	query := r.client.Collection("transactions").
+		Where("productId", "==", productID).
+		Where("paymentStatus", "==", "pending").
+		Where("status", "in", []string{"payment_pending", "payment_processing"})
+	
+	docs, err := query.Documents(ctx).GetAll()
+	if err != nil {
+		log.Printf("Error getting pending transaction count: %v", err)
+		return 0, err
+	}
+	
+	count := len(docs)
+	log.Printf("Found %d pending transactions for product %s", count, productID)
+	return count, nil
 }
 
 // GetByMidtransOrderID retrieves a transaction by Midtrans order ID
