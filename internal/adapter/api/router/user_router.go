@@ -11,6 +11,9 @@ func SetupUserRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, ad
 
 	userHandler := handler.GetUserHandler()
 
+	// Public seller profiles (no auth required)
+	e.GET("/v1/sellers/:id/profile", userHandler.GetPublicSellerProfile)
+
 	users := e.Group("/v1/users")
 	users.Use(authMiddleware.Authenticate)
 

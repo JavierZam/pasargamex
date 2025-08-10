@@ -92,7 +92,7 @@ func (h *UserHandler) GetProfile(c echo.Context) error {
 	})
 }
 
-// New: GetUserByID - get any user profile by ID (for chat purposes)
+// GetUserByID - get any user profile by ID (for chat purposes)
 func (h *UserHandler) GetUserByID(c echo.Context) error {
 	targetUserID := c.Param("id")
 	if targetUserID == "" {
@@ -111,6 +111,21 @@ func (h *UserHandler) GetUserByID(c echo.Context) error {
 		"phone":    user.Phone,
 		"bio":      user.Bio,
 	})
+}
+
+// GetPublicSellerProfile gets public seller profile with rating and stats
+func (h *UserHandler) GetPublicSellerProfile(c echo.Context) error {
+	sellerID := c.Param("id")
+	if sellerID == "" {
+		return response.Error(c, errors.BadRequest("Seller ID is required", nil))
+	}
+
+	profile, err := h.userUseCase.GetPublicSellerProfile(c.Request().Context(), sellerID)
+	if err != nil {
+		return response.Error(c, err)
+	}
+
+	return response.Success(c, profile)
 }
 
 func (h *UserHandler) UpdatePassword(c echo.Context) error {

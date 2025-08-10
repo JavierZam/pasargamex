@@ -147,6 +147,48 @@ func (uc *TransactionUseCase) GetTransactionByID(ctx context.Context, userID, tr
 	return uc.prepareTransactionResponse(transaction, userID), nil
 }
 
+// GetTransactionStatus returns lightweight status information
+func (uc *TransactionUseCase) GetTransactionStatus(ctx context.Context, userID, transactionID string) (map[string]interface{}, error) {
+	transaction, err := uc.transactionRepo.GetByID(ctx, transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	if transaction.BuyerID != userID && transaction.SellerID != userID && transaction.AdminID != userID {
+		return nil, errors.Forbidden("You don't have permission to view this transaction", nil)
+	}
+
+	// Return lightweight status info for frontend polling
+	statusInfo := map[string]interface{}{
+		"id":                  transaction.ID,
+		"status":              transaction.Status,
+		"payment_status":      transaction.PaymentStatus,
+		"delivery_method":     transaction.DeliveryMethod,
+		"total_amount":        transaction.TotalAmount,
+		"created_at":          transaction.CreatedAt,
+		"updated_at":          transaction.UpdatedAt,
+		"credentials_delivered": transaction.CredentialsDelivered,
+	}
+
+	// Add payment info if exists
+	if transaction.PaymentAt != nil {
+		statusInfo["payment_at"] = transaction.PaymentAt
+	}
+
+	// Add delivery info if exists
+	if transaction.CredentialsDeliveredAt != nil {
+		statusInfo["credentials_delivered_at"] = transaction.CredentialsDeliveredAt
+	}
+
+	// Add middleman info if applicable
+	if transaction.DeliveryMethod == "middleman" {
+		statusInfo["middleman_status"] = transaction.MiddlemanStatus
+		statusInfo["admin_id"] = transaction.AdminID
+	}
+
+	return statusInfo, nil
+}
+
 func (uc *TransactionUseCase) ListTransactions(ctx context.Context, userID, role, status string, page, limit int) ([]interface{}, int64, error) {
 	if role != "buyer" && role != "seller" {
 		role = "buyer"

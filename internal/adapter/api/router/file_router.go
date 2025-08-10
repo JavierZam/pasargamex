@@ -10,6 +10,9 @@ import (
 func SetupFileRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddleware *middleware.AdminMiddleware) {
 	fileHandler := handler.GetFileHandler()
 
+	// Public file access (no authentication required)
+	e.GET("/v1/public/files/:id", fileHandler.GetPublicFile)
+
 	files := e.Group("/v1/files")
 	files.Use(authMiddleware.Authenticate)
 

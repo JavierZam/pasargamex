@@ -1073,3 +1073,24 @@ func extractObjectNameFromStorageURL(storageURL string) string {
 
 	return ""
 }
+
+// GetPublicFile serves public files without authentication (for product images, etc.)
+func (h *FileHandler) GetPublicFile(c echo.Context) error {
+	fileID := c.Param("id")
+	if fileID == "" {
+		return response.Error(c, errors.BadRequest("File ID is required", nil))
+	}
+
+	metadata, err := h.fileMetadataRepo.GetByID(c.Request().Context(), fileID)
+	if err != nil {
+		return response.Error(c, errors.NotFound("File not found", err))
+	}
+
+	// Only allow public files via this endpoint
+	if !metadata.IsPublic {
+		return response.Error(c, errors.Forbidden("File is not public", nil))
+	}
+
+	// For public files, just redirect to the storage URL
+	return c.Redirect(http.StatusFound, metadata.URL)
+}

@@ -95,6 +95,22 @@ func (uc *ReviewUseCase) ListReviews(ctx context.Context, userID, type_ string, 
 	return uc.reviewRepo.List(ctx, filter, pagination.PageSize, pagination.Offset)
 }
 
+// GetProductReviews gets all reviews for a specific product
+func (uc *ReviewUseCase) GetProductReviews(ctx context.Context, productID string, rating int, page, limit int) ([]*entity.Review, int64, error) {
+	filter := make(map[string]interface{})
+	
+	filter["productId"] = productID
+	filter["status"] = "active"
+
+	if rating > 0 {
+		filter["rating"] = rating
+	}
+
+	pagination := utils.NewPaginationParams(page, limit)
+
+	return uc.reviewRepo.List(ctx, filter, pagination.PageSize, pagination.Offset)
+}
+
 func (uc *ReviewUseCase) ReportReview(ctx context.Context, reporterID, reviewID, reason, description string) (*entity.ReviewReport, error) {
 
 	review, err := uc.reviewRepo.GetByID(ctx, reviewID)

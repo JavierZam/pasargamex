@@ -70,6 +70,31 @@ func (uc *UserUseCase) GetUserProfile(ctx context.Context, userId string) (*enti
 	return user, nil
 }
 
+// GetPublicSellerProfile returns public seller profile with stats
+func (uc *UserUseCase) GetPublicSellerProfile(ctx context.Context, sellerID string) (map[string]interface{}, error) {
+	user, err := uc.userRepo.GetByID(ctx, sellerID)
+	if err != nil {
+		return nil, errors.NotFound("Seller", err)
+	}
+
+	// Only return public info for seller profiles
+	profile := map[string]interface{}{
+		"id":                   user.ID,
+		"username":             user.Username,
+		"bio":                  user.Bio,
+		"verification_status":  user.VerificationStatus,
+		"seller_rating":        user.SellerRating,
+		"seller_review_count":  user.SellerReviewCount,
+		"created_at":          user.CreatedAt,
+		"updated_at":          user.UpdatedAt,
+	}
+
+	// Add member since information
+	profile["member_since"] = user.CreatedAt.Format("January 2006")
+
+	return profile, nil
+}
+
 func (uc *UserUseCase) UpdatePassword(ctx context.Context, userId, currentPassword, newPassword string) error {
 	user, err := uc.userRepo.GetByID(ctx, userId)
 	if err != nil {

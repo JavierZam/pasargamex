@@ -17,6 +17,7 @@ func SetupTransactionRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddlew
 	transactions.POST("", transactionHandler.CreateTransaction)
 	transactions.GET("", transactionHandler.ListTransactions)
 	transactions.GET("/:id", transactionHandler.GetTransaction)
+	transactions.GET("/:id/status", transactionHandler.GetTransactionStatus) // Lightweight status endpoint
 	transactions.POST("/:id/payment", transactionHandler.ProcessPayment) // Buyer initiates payment
 	transactions.POST("/:id/confirm", transactionHandler.ConfirmDelivery)
 	transactions.POST("/:id/dispute", transactionHandler.CreateDispute)

@@ -19,6 +19,7 @@ func Setup(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddlew
 	SetupReviewRouter(e, authMiddleware, adminMiddleware)
 	SetupFileRouter(e, authMiddleware, adminMiddleware)
 	SetupWalletRouter(e, authMiddleware, adminMiddleware)
+	SetupAdminRouter(e, authMiddleware, adminMiddleware) // New admin routes
 }
 
 func SetupWalletRouter(e *echo.Echo, authMiddleware *middleware.AuthMiddleware, adminMiddleware *middleware.AdminMiddleware) {

@@ -187,6 +187,60 @@ func (h *ReviewHandler) UpdateReviewStatus(c echo.Context) error {
 	return response.Success(c, review)
 }
 
+// GetProductReviews gets all reviews for a specific product
+func (h *ReviewHandler) GetProductReviews(c echo.Context) error {
+	productID := c.Param("id")
+	if productID == "" {
+		return response.Error(c, errors.BadRequest("Product ID is required", nil))
+	}
+
+	ratingStr := c.QueryParam("rating")
+	var rating int
+	if ratingStr != "" {
+		var err error
+		rating, err = strconv.Atoi(ratingStr)
+		if err != nil || rating < 1 || rating > 5 {
+			return response.Error(c, errors.BadRequest("Invalid rating value", nil))
+		}
+	}
+
+	pageStr := c.QueryParam("page")
+	limitStr := c.QueryParam("limit")
+
+	page := 1
+	limit := 20
+
+	if pageStr != "" {
+		var err error
+		page, err = strconv.Atoi(pageStr)
+		if err != nil || page < 1 {
+			page = 1
+		}
+	}
+
+	if limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil || limit < 1 || limit > 100 {
+			limit = 20
+		}
+	}
+
+	reviews, total, err := h.reviewUseCase.GetProductReviews(
+		c.Request().Context(),
+		productID,
+		rating,
+		page,
+		limit,
+	)
+
+	if err != nil {
+		return response.Error(c, err)
+	}
+
+	return response.Paginated(c, reviews, total, page, limit)
+}
+
 func (h *ReviewHandler) GetReviewReports(c echo.Context) error {
 
 	status := c.QueryParam("status")

@@ -70,6 +70,23 @@ func (h *TransactionHandler) GetTransaction(c echo.Context) error {
 	return response.Success(c, transaction)
 }
 
+// GetTransactionStatus returns lightweight transaction status info
+func (h *TransactionHandler) GetTransactionStatus(c echo.Context) error {
+	transactionID := c.Param("id")
+	if transactionID == "" {
+		return response.Error(c, errors.BadRequest("Transaction ID is required", nil))
+	}
+
+	userID := c.Get("uid").(string)
+
+	status, err := h.transactionUseCase.GetTransactionStatus(c.Request().Context(), userID, transactionID)
+	if err != nil {
+		return response.Error(c, err)
+	}
+
+	return response.Success(c, status)
+}
+
 func (h *TransactionHandler) ListTransactions(c echo.Context) error {
 	role := c.QueryParam("role")
 	status := c.QueryParam("status")

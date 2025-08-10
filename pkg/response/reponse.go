@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	apperrors "pasargamex/pkg/errors"
 	"github.com/go-playground/validator/v10"
@@ -12,14 +13,16 @@ import (
 )
 
 type Response struct {
-	Success bool        `json:"success"`
-	Data    interface{} `json:"data,omitempty"`
-	Error   *ErrorInfo  `json:"error,omitempty"`
+	Success   bool        `json:"success"`
+	Data      interface{} `json:"data,omitempty"`
+	Error     *ErrorInfo  `json:"error,omitempty"`
+	Timestamp string      `json:"timestamp"`
 }
 
 type ErrorInfo struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	Details interface{} `json:"details,omitempty"`
 }
 
 type PaginatedResponse struct {
@@ -30,6 +33,11 @@ type PaginatedResponse struct {
 	TotalPages int         `json:"totalPages"`
 }
 
+type MetaInfo struct {
+	RequestID string `json:"request_id,omitempty"`
+	Version   string `json:"version,omitempty"`
+}
+
 type CustomError struct {
 	Code    string
 	Message string
@@ -38,15 +46,17 @@ type CustomError struct {
 
 func Success(c echo.Context, data interface{}) error {
 	return c.JSON(http.StatusOK, Response{
-		Success: true,
-		Data:    data,
+		Success:   true,
+		Data:      data,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
 func Created(c echo.Context, data interface{}) error {
 	return c.JSON(http.StatusCreated, Response{
-		Success: true,
-		Data:    data,
+		Success:   true,
+		Data:      data,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
@@ -57,7 +67,8 @@ func Paginated(c echo.Context, items interface{}, total int64, page, pageSize in
 	}
 
 	return c.JSON(http.StatusOK, Response{
-		Success: true,
+		Success:   true,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Data: PaginatedResponse{
 			Items:      items,
 			Total:      total,
@@ -83,7 +94,8 @@ func SuccessPaginated(c echo.Context, items interface{}, total int64, limit, off
 	}
 
 	return c.JSON(http.StatusOK, Response{
-		Success: true,
+		Success:   true,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Data: PaginatedResponse{
 			Items:      items,
 			Total:      total,
@@ -105,7 +117,8 @@ func Error(c echo.Context, err error) error {
 	var appErr *apperrors.AppError
 	if errors.As(err, &appErr) {
 		return c.JSON(appErr.Status, Response{
-			Success: false,
+			Success:   false,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
 			Error: &ErrorInfo{
 				Code:    appErr.Code,
 				Message: appErr.Message,
@@ -114,7 +127,8 @@ func Error(c echo.Context, err error) error {
 	}
 
 	return c.JSON(http.StatusInternalServerError, Response{
-		Success: false,
+		Success:   false,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Error: &ErrorInfo{
 			Code:    "INTERNAL_ERROR",
 			Message: "An unexpected error occurred",
@@ -163,7 +177,8 @@ func handleValidationError(c echo.Context, validationErr validator.ValidationErr
 		}
 
 		return c.JSON(http.StatusBadRequest, Response{
-			Success: false,
+			Success:   false,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
 			Error: &ErrorInfo{
 				Code:    "VALIDATION_ERROR",
 				Message: message,
@@ -172,7 +187,8 @@ func handleValidationError(c echo.Context, validationErr validator.ValidationErr
 	}
 
 	return c.JSON(http.StatusBadRequest, Response{
-		Success: false,
+		Success:   false,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Error: &ErrorInfo{
 			Code:    "VALIDATION_ERROR",
 			Message: "Invalid input data",
