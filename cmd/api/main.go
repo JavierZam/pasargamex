@@ -110,6 +110,9 @@ func main() {
 	paymentMethodRepo := repository.NewFirestorePaymentMethodRepository(firestoreClient)
 	topupRepo := repository.NewFirestoreTopupRepository(firestoreClient)
 	withdrawRepo := repository.NewFirestoreWithdrawRepository(firestoreClient)
+	
+	// Wishlist repository
+	wishlistRepo := repository.NewFirestoreWishlistRepository(firestoreClient)
 
 	firebaseAuthClient := firebase.NewFirebaseAuthClient(authClient, cfg.FirebaseApiKey)
 
@@ -126,6 +129,8 @@ func main() {
 	reviewUseCase := usecase.NewReviewUseCase(reviewRepo, userRepo)
 	// Wallet use case
 	walletUseCase := usecase.NewWalletUseCase(walletRepo, walletTxnRepo, paymentMethodRepo, topupRepo, withdrawRepo, userRepo)
+	// Wishlist use case
+	wishlistUseCase := usecase.NewWishlistUseCase(wishlistRepo, productRepo)
 	
 	// Initialize Midtrans Payment gateway service
 	isProduction := cfg.MidtransEnvironment == "production"
@@ -170,6 +175,7 @@ func main() {
 	wsHandler := handler.NewWebSocketHandlerWithAuth(wsManager, authClient, chatUseCase)
 	paymentHandler := handler.NewPaymentHandler(enhancedTransactionUseCase)
 	escrowHandler := handler.NewEscrowHandler(escrowManagerUseCase)
+	wishlistHandler := handler.NewWishlistHandler(wishlistUseCase)
 	// Start cleanup routine for rate limiters
 	wsHandler.CleanupRateLimiters()
 
@@ -216,6 +222,7 @@ func main() {
 	router.SetupChatRouter(e, chatHandler, authMiddleware, adminMiddleware)
 	router.SetupWebSocketRouter(e, wsHandler)
 	router.SetupEscrowRoutes(e, escrowHandler, authMiddleware)
+	router.SetupWishlistRouter(e, wishlistHandler, authMiddleware)
 
 	// Serve static files for chat testing
 	e.Static("/websocket-chat-pgx", "websocket-chat-pgx")
