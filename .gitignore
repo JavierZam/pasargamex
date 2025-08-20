@@ -12,6 +12,7 @@ firebase-service-account.json
 *.out
 vendor/
 tmp/
+node_modules
 
 # Binary files
 pasargamex
