@@ -54,3 +54,33 @@ func (m *AuthMiddleware) GetUIDFromToken(ctx context.Context, token string) (str
 
 	return firebaseToken.UID, nil
 }
+
+// RequireAuth middleware for Gorilla Mux
+func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "Authorization header is required", http.StatusUnauthorized)
+			return
+		}
+
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			http.Error(w, "Invalid authorization format", http.StatusUnauthorized)
+			return
+		}
+
+		idToken := parts[1]
+
+		token, err := m.authClient.VerifyIDToken(r.Context(), idToken)
+		if err != nil {
+			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+			return
+		}
+
+		// Add user ID to request header for downstream handlers
+		r.Header.Set("X-User-ID", token.UID)
+
+		next.ServeHTTP(w, r)
+	})
+}

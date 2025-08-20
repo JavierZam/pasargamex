@@ -3,7 +3,6 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"pasargamex/internal/domain/entity"
@@ -36,7 +35,6 @@ type GamificationUseCase interface {
 type gamificationUseCase struct {
 	gamificationRepo repository.GamificationRepository
 	userRepo         repository.UserRepository
-	logger           logger.Logger
 }
 
 type GamificationEventRequest struct {
@@ -50,12 +48,10 @@ type GamificationEventRequest struct {
 func NewGamificationUseCase(
 	gamificationRepo repository.GamificationRepository,
 	userRepo repository.UserRepository,
-	logger logger.Logger,
 ) GamificationUseCase {
 	return &gamificationUseCase{
 		gamificationRepo: gamificationRepo,
 		userRepo:         userRepo,
-		logger:           logger,
 	}
 }
 
@@ -88,7 +84,7 @@ func (uc *gamificationUseCase) GetUserGamificationStatus(ctx context.Context, us
 	// Get next title
 	nextTitle, err := uc.gamificationRepo.GetNextTitle(ctx, currentTitle.Level)
 	if err != nil {
-		uc.logger.Warn("Failed to get next title", "error", err)
+		logger.Warn("Failed to get next title: %v", err)
 	}
 
 	// Map user achievements
@@ -120,7 +116,7 @@ func (uc *gamificationUseCase) GetUserGamificationStatus(ctx context.Context, us
 			// Calculate progress for locked achievements
 			eligible, progress, err := uc.CheckAchievementEligibility(ctx, userID, achievement)
 			if err != nil {
-				uc.logger.Warn("Failed to check achievement eligibility", "achievementId", achievement.ID, "error", err)
+				logger.Warn("Failed to check achievement eligibility for %s: %v", achievement.ID, err)
 			} else if progress != nil {
 				status.Progress = progress
 			}
@@ -128,7 +124,7 @@ func (uc *gamificationUseCase) GetUserGamificationStatus(ctx context.Context, us
 			// Auto-unlock if eligible
 			if eligible && progress != nil && progress.Completed {
 				if err := uc.UnlockAchievement(ctx, userID, achievement.ID, nil); err != nil {
-					uc.logger.Error("Failed to auto-unlock achievement", "achievementId", achievement.ID, "error", err)
+					logger.Error("Failed to auto-unlock achievement %s: %v", achievement.ID, err)
 				} else {
 					status.Unlocked = true
 					now := time.Now()
@@ -197,7 +193,7 @@ func (uc *gamificationUseCase) InitializeUserGamification(ctx context.Context, u
 
 	// Check for milestone achievements (like "Founding Father")
 	if err := uc.checkMilestoneAchievements(ctx, userID); err != nil {
-		uc.logger.Warn("Failed to check milestone achievements", "userID", userID, "error", err)
+		logger.Warn("Failed to check milestone achievements for user %s: %v", userID, err)
 	}
 
 	return nil
@@ -228,7 +224,7 @@ func (uc *gamificationUseCase) TrackUserEvent(ctx context.Context, userID string
 			}
 			
 			if err := uc.gamificationRepo.IncrementSecretTrigger(ctx, userID, eventReq.TriggerID, count); err != nil {
-				uc.logger.Error("Failed to increment secret trigger", "triggerID", eventReq.TriggerID, "error", err)
+				logger.Error("Failed to increment secret trigger %s: %v", eventReq.TriggerID, err)
 			}
 		}
 	}
@@ -237,9 +233,9 @@ func (uc *gamificationUseCase) TrackUserEvent(ctx context.Context, userID string
 	go func() {
 		newAchievements, err := uc.ProcessUserEvents(context.Background(), userID)
 		if err != nil {
-			uc.logger.Error("Failed to process user events", "userID", userID, "error", err)
+			logger.Error("Failed to process user events for %s: %v", userID, err)
 		} else if len(newAchievements) > 0 {
-			uc.logger.Info("New achievements unlocked", "userID", userID, "count", len(newAchievements))
+			logger.Info("New achievements unlocked for user %s: %d", userID, len(newAchievements))
 		}
 	}()
 
@@ -261,7 +257,7 @@ func (uc *gamificationUseCase) ProcessUserEvents(ctx context.Context, userID str
 		case "secret_trigger":
 			achievements, err := uc.processSecretTriggerEvent(ctx, userID, event)
 			if err != nil {
-				uc.logger.Error("Failed to process secret trigger event", "eventID", event.ID, "error", err)
+				logger.Error("Failed to process secret trigger event %s: %v", event.ID, err)
 				continue
 			}
 			newAchievements = append(newAchievements, achievements...)
@@ -269,7 +265,7 @@ func (uc *gamificationUseCase) ProcessUserEvents(ctx context.Context, userID str
 		case "transaction_complete":
 			achievements, err := uc.processTransactionEvent(ctx, userID, event)
 			if err != nil {
-				uc.logger.Error("Failed to process transaction event", "eventID", event.ID, "error", err)
+				logger.Error("Failed to process transaction event %s: %v", event.ID, err)
 				continue
 			}
 			newAchievements = append(newAchievements, achievements...)
@@ -277,7 +273,7 @@ func (uc *gamificationUseCase) ProcessUserEvents(ctx context.Context, userID str
 
 		// Mark event as processed
 		if err := uc.gamificationRepo.MarkEventProcessed(ctx, event.ID); err != nil {
-			uc.logger.Error("Failed to mark event as processed", "eventID", event.ID, "error", err)
+			logger.Error("Failed to mark event as processed %s: %v", event.ID, err)
 		}
 	}
 
@@ -332,10 +328,10 @@ func (uc *gamificationUseCase) UnlockAchievement(ctx context.Context, userID, ac
 
 	// Check if user qualifies for new title
 	if err := uc.UpdateUserTitle(ctx, userID); err != nil {
-		uc.logger.Error("Failed to update user title", "userID", userID, "error", err)
+		logger.Error("Failed to update user title for %s: %v", userID, err)
 	}
 
-	uc.logger.Info("Achievement unlocked", "userID", userID, "achievementID", achievementID, "points", achievement.Points)
+	logger.Info("Achievement unlocked for user %s: %s (+%d points)", userID, achievementID, achievement.Points)
 
 	return nil
 }

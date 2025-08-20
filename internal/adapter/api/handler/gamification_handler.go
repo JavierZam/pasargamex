@@ -8,22 +8,17 @@ import (
 
 	"pasargamex/internal/usecase"
 	"pasargamex/pkg/logger"
-
-	"github.com/gorilla/mux"
 )
 
 type GamificationHandler struct {
 	gamificationUseCase usecase.GamificationUseCase
-	logger              logger.Logger
 }
 
 func NewGamificationHandler(
 	gamificationUseCase usecase.GamificationUseCase,
-	logger logger.Logger,
 ) *GamificationHandler {
 	return &GamificationHandler{
 		gamificationUseCase: gamificationUseCase,
-		logger:              logger,
 	}
 }
 
@@ -37,14 +32,14 @@ func (h *GamificationHandler) GetUserStatus(w http.ResponseWriter, r *http.Reque
 
 	// Initialize gamification if not exists
 	if err := h.gamificationUseCase.InitializeUserGamification(r.Context(), userID); err != nil {
-		h.logger.Error("Failed to initialize gamification", "userID", userID, "error", err)
+		logger.Error("Failed to initialize gamification for user %s: %v", userID, err)
 		h.respondWithError(w, http.StatusInternalServerError, "Failed to initialize gamification")
 		return
 	}
 
 	status, err := h.gamificationUseCase.GetUserGamificationStatus(r.Context(), userID)
 	if err != nil {
-		h.logger.Error("Failed to get gamification status", "userID", userID, "error", err)
+		logger.Error("Failed to get gamification status for user %s: %v", userID, err)
 		h.respondWithError(w, http.StatusInternalServerError, "Failed to get gamification status")
 		return
 	}
@@ -82,7 +77,7 @@ func (h *GamificationHandler) TrackEvents(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := h.gamificationUseCase.TrackUserEvent(r.Context(), userID, request.Events); err != nil {
-		h.logger.Error("Failed to track events", "userID", userID, "error", err)
+		logger.Error("Failed to track events for user %s: %v", userID, err)
 		h.respondWithError(w, http.StatusInternalServerError, "Failed to track events")
 		return
 	}
@@ -104,7 +99,7 @@ func (h *GamificationHandler) ProcessEvents(w http.ResponseWriter, r *http.Reque
 
 	newAchievements, err := h.gamificationUseCase.ProcessUserEvents(r.Context(), userID)
 	if err != nil {
-		h.logger.Error("Failed to process events", "userID", userID, "error", err)
+		logger.Error("Failed to process events for user %s: %v", userID, err)
 		h.respondWithError(w, http.StatusInternalServerError, "Failed to process events")
 		return
 	}
@@ -140,10 +135,7 @@ func (h *GamificationHandler) UnlockAchievement(w http.ResponseWriter, r *http.R
 	}
 
 	if err := h.gamificationUseCase.UnlockAchievement(r.Context(), userID, request.AchievementID, request.TriggerData); err != nil {
-		h.logger.Error("Failed to unlock achievement", 
-			"userID", userID, 
-			"achievementID", request.AchievementID, 
-			"error", err)
+		logger.Error("Failed to unlock achievement %s for user %s: %v", request.AchievementID, userID, err)
 		h.respondWithError(w, http.StatusInternalServerError, "Failed to unlock achievement")
 		return
 	}
@@ -168,7 +160,7 @@ func (h *GamificationHandler) GetLeaderboard(w http.ResponseWriter, r *http.Requ
 
 	leaderboard, err := h.gamificationUseCase.GetLeaderboard(r.Context(), limit)
 	if err != nil {
-		h.logger.Error("Failed to get leaderboard", "error", err)
+		logger.Error("Failed to get leaderboard: %v", err)
 		h.respondWithError(w, http.StatusInternalServerError, "Failed to get leaderboard")
 		return
 	}
@@ -204,10 +196,7 @@ func (h *GamificationHandler) UpdateProgress(w http.ResponseWriter, r *http.Requ
 	}
 
 	if err := h.gamificationUseCase.UpdateUserProgress(r.Context(), userID, request.ProgressType, request.Value); err != nil {
-		h.logger.Error("Failed to update progress", 
-			"userID", userID, 
-			"progressType", request.ProgressType, 
-			"error", err)
+		logger.Error("Failed to update progress %s for user %s: %v", request.ProgressType, userID, err)
 		h.respondWithError(w, http.StatusInternalServerError, "Failed to update progress")
 		return
 	}
@@ -248,10 +237,7 @@ func (h *GamificationHandler) UpdateStatistics(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := h.gamificationUseCase.UpdateUserStatistics(r.Context(), userID, request.StatType, request.Increment); err != nil {
-		h.logger.Error("Failed to update statistics", 
-			"userID", userID, 
-			"statType", request.StatType, 
-			"error", err)
+		logger.Error("Failed to update statistics %s for user %s: %v", request.StatType, userID, err)
 		h.respondWithError(w, http.StatusInternalServerError, "Failed to update statistics")
 		return
 	}
@@ -308,10 +294,7 @@ func (h *GamificationHandler) TransactionWebhook(w http.ResponseWriter, r *http.
 	}
 
 	if err := h.gamificationUseCase.TrackUserEvent(r.Context(), request.UserID, events); err != nil {
-		h.logger.Error("Failed to track transaction event", 
-			"userID", request.UserID, 
-			"transactionType", request.TransactionType, 
-			"error", err)
+		logger.Error("Failed to track transaction event %s for user %s: %v", request.TransactionType, request.UserID, err)
 		h.respondWithError(w, http.StatusInternalServerError, "Failed to track transaction")
 		return
 	}
@@ -323,10 +306,7 @@ func (h *GamificationHandler) TransactionWebhook(w http.ResponseWriter, r *http.
 	}
 
 	if err := h.gamificationUseCase.UpdateUserProgress(r.Context(), request.UserID, progressType, int64(request.Amount)); err != nil {
-		h.logger.Error("Failed to update user progress", 
-			"userID", request.UserID, 
-			"progressType", progressType, 
-			"error", err)
+		logger.Error("Failed to update user progress %s for user %s: %v", progressType, request.UserID, err)
 	}
 
 	h.respondWithJSON(w, http.StatusOK, map[string]interface{}{
