@@ -4,41 +4,41 @@ import (
 	"pasargamex/internal/adapter/api/handler"
 	"pasargamex/internal/adapter/api/middleware"
 
-	"github.com/gorilla/mux"
+	"github.com/labstack/echo/v4"
 )
 
-func SetupGamificationRoutes(r *mux.Router, h *handler.GamificationHandler, authMiddleware *middleware.AuthMiddleware) {
+func SetupGamificationRoutes(e *echo.Echo, h *handler.GamificationHandler, authMiddleware *middleware.AuthMiddleware) {
 	// Public routes (no auth required)
-	public := r.PathPrefix("/api/gamification").Subrouter()
+	public := e.Group("/api/gamification")
 	
 	// Webhook for transaction events (called by payment service)
-	public.HandleFunc("/webhook/transaction", h.TransactionWebhook).Methods("POST")
+	public.POST("/webhook/transaction", h.TransactionWebhook)
 
 	// Protected routes (require authentication)
-	protected := r.PathPrefix("/api/gamification").Subrouter()
-	protected.Use(authMiddleware.RequireAuth)
+	protected := e.Group("/api/gamification")
+	protected.Use(authMiddleware.Authenticate)
 
 	// User gamification status and data
-	protected.HandleFunc("/status", h.GetUserStatus).Methods("GET")
+	protected.GET("/status", h.GetUserStatus)
 	
 	// Event tracking
-	protected.HandleFunc("/track-events", h.TrackEvents).Methods("POST")
-	protected.HandleFunc("/process-events", h.ProcessEvents).Methods("POST")
+	protected.POST("/track-events", h.TrackEvents)
+	protected.POST("/process-events", h.ProcessEvents)
 	
 	// Achievement management
-	protected.HandleFunc("/unlock-achievement", h.UnlockAchievement).Methods("POST")
+	protected.POST("/unlock-achievement", h.UnlockAchievement)
 	
 	// Progress and statistics updates
-	protected.HandleFunc("/update-progress", h.UpdateProgress).Methods("POST")
-	protected.HandleFunc("/update-stats", h.UpdateStatistics).Methods("POST")
+	protected.POST("/update-progress", h.UpdateProgress)
+	protected.POST("/update-stats", h.UpdateStatistics)
 	
 	// Leaderboard (public but might want to require auth later)
-	protected.HandleFunc("/leaderboard", h.GetLeaderboard).Methods("GET")
+	protected.GET("/leaderboard", h.GetLeaderboard)
 
 	// Admin routes (require admin auth)
-	admin := r.PathPrefix("/api/admin/gamification").Subrouter()
-	admin.Use(authMiddleware.RequireAuth) // Should also check for admin role
+	admin := e.Group("/api/admin/gamification")
+	admin.Use(authMiddleware.Authenticate) // Should also check for admin role
 	
 	// Achievement management for admins
-	admin.HandleFunc("/achievements", h.CreateAchievement).Methods("POST")
+	admin.POST("/achievements", h.CreateAchievement)
 }

@@ -113,6 +113,9 @@ func main() {
 	
 	// Wishlist repository
 	wishlistRepo := repository.NewFirestoreWishlistRepository(firestoreClient)
+	
+	// Gamification repository
+	gamificationRepo := repository.NewFirestoreGamificationRepository(firestoreClient)
 
 	firebaseAuthClient := firebase.NewFirebaseAuthClient(authClient, cfg.FirebaseApiKey)
 
@@ -131,6 +134,9 @@ func main() {
 	walletUseCase := usecase.NewWalletUseCase(walletRepo, walletTxnRepo, paymentMethodRepo, topupRepo, withdrawRepo, userRepo)
 	// Wishlist use case
 	wishlistUseCase := usecase.NewWishlistUseCase(wishlistRepo, productRepo)
+	
+	// Gamification use case  
+	gamificationUseCase := usecase.NewGamificationUseCase(gamificationRepo, userRepo)
 	
 	// Initialize Midtrans Payment gateway service
 	isProduction := cfg.MidtransEnvironment == "production"
@@ -176,6 +182,7 @@ func main() {
 	paymentHandler := handler.NewPaymentHandler(enhancedTransactionUseCase)
 	escrowHandler := handler.NewEscrowHandler(escrowManagerUseCase)
 	wishlistHandler := handler.NewWishlistHandler(wishlistUseCase)
+	gamificationHandler := handler.NewGamificationHandler(gamificationUseCase)
 	// Start cleanup routine for rate limiters
 	wsHandler.CleanupRateLimiters()
 
@@ -223,6 +230,7 @@ func main() {
 	router.SetupWebSocketRouter(e, wsHandler)
 	router.SetupEscrowRoutes(e, escrowHandler, authMiddleware)
 	router.SetupWishlistRouter(e, wishlistHandler, authMiddleware)
+	router.SetupGamificationRoutes(e, gamificationHandler, authMiddleware)
 
 	// Serve static files for chat testing
 	e.Static("/websocket-chat-pgx", "websocket-chat-pgx")
