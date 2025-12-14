@@ -127,18 +127,16 @@ func (r *firestoreChatRepository) GetMessagesByChat(ctx context.Context, chatID 
 	return messages, total, nil
 }
 
-func (r *firestoreChatRepository) UpdateMessageReadStatus(ctx context.Context, messageID string, userID string) error {
-	// To update read status, we need to find the message first.
-	// This approach uses CollectionGroup which requires an index for 'id' field.
-	// Alternatively, if chatID is passed along with messageID, we can directly access the subcollection.
-	// For now, let's assume messageID is unique enough to find the message across chats.
-	// If performance is an issue, consider passing chatID to this method.
-	iter := r.client.CollectionGroup("messages").Where("id", "==", messageID).Limit(1).Documents(ctx)
-	doc, err := iter.Next()
+func (r *firestoreChatRepository) UpdateMessageReadStatus(ctx context.Context, chatID, messageID string, userID string) error {
+	// Use direct path with chatID for efficient access (no CollectionGroup index needed)
+	docRef := r.client.Collection("chats").Doc(chatID).Collection("messages").Doc(messageID)
+	doc, err := docRef.Get(ctx)
 
 	if err != nil {
-		if err == iterator.Done {
-			return errors.NotFound("Message not found", nil)
+		if status.Code(err) == codes.NotFound {
+			// Message not found in this chat - silently skip
+			log.Printf("UpdateMessageReadStatus: Message %s not found in chat %s (may be old/deleted)", messageID, chatID)
+			return nil
 		}
 		return errors.Internal("Failed to get message", err)
 	}
@@ -159,7 +157,7 @@ func (r *firestoreChatRepository) UpdateMessageReadStatus(ctx context.Context, m
 	message.ReadBy = append(message.ReadBy, userID)
 
 	// Update the message
-	_, err = doc.Ref.Set(ctx, message) // Use doc.Ref.Set to update the specific message
+	_, err = docRef.Set(ctx, message)
 	if err != nil {
 		return errors.Internal("Failed to update message read status", err)
 	}
@@ -206,46 +204,43 @@ func (r *firestoreChatRepository) GetChatByTransactionID(ctx context.Context, tr
 }
 
 func (r *firestoreChatRepository) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*entity.Chat, int64, error) {
+	// Single query to fetch all chats for user (optimized - no duplicate query)
 	query := r.client.Collection("chats").Where("participants", "array-contains", userID).OrderBy("updatedAt", firestore.Desc)
 
-	countDocs, err := query.Documents(ctx).GetAll()
+	allDocs, err := query.Documents(ctx).GetAll()
 	if err != nil {
-		log.Printf("Firestore error while counting chats for user %s: %v", userID, err)
-		return nil, 0, errors.Internal("Failed to count chats", err)
-	}
-	total := int64(len(countDocs))
-
-	if limit != -1 && limit > 0 {
-		query = query.Limit(limit)
-	}
-	if offset > 0 {
-		query = query.Offset(offset)
+		log.Printf("Firestore error while fetching chats for user %s: %v", userID, err)
+		return nil, 0, errors.Internal("Failed to fetch chats", err)
 	}
 
-	iter := query.Documents(ctx)
+	total := int64(len(allDocs))
+
+	// Apply pagination in-memory (faster than double Firestore query)
+	start := offset
+	end := len(allDocs)
+	if limit > 0 && limit != -1 {
+		end = start + limit
+		if end > len(allDocs) {
+			end = len(allDocs)
+		}
+	}
+	if start > len(allDocs) {
+		start = len(allDocs)
+	}
+
 	var chats []*entity.Chat
-
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			log.Printf("Firestore error while iterating chats for user %s: %v", userID, err)
-			return nil, 0, errors.Internal("Failed to iterate chats", err)
-		}
-
+	for i := start; i < end; i++ {
 		var chat entity.Chat
-		if err := doc.DataTo(&chat); err != nil {
+		if err := allDocs[i].DataTo(&chat); err != nil {
 			log.Printf("Error parsing chat data for user %s: %v", userID, err)
-			return nil, 0, errors.Internal("Failed to parse chat data", err)
+			continue // Skip bad data instead of failing
 		}
-
 		chats = append(chats, &chat)
 	}
 
 	return chats, total, nil
 }
+
 func (r *firestoreChatRepository) Update(ctx context.Context, chat *entity.Chat) error {
 	chat.UpdatedAt = time.Now()
 
@@ -269,27 +264,27 @@ func (r *firestoreChatRepository) Delete(ctx context.Context, id string) error {
 func (r *firestoreChatRepository) GetGroupChatByProductAndParticipants(ctx context.Context, productID string, participants []string) (*entity.Chat, error) {
 	// Sort participants for consistent comparison
 	sort.Strings(participants)
-	
+
 	// Query chats by product ID first
 	query := r.client.Collection("chats").Where("productId", "==", productID)
-	
+
 	docs, err := query.Documents(ctx).GetAll()
 	if err != nil {
 		return nil, errors.Internal("Failed to query group chats", err)
 	}
-	
+
 	// Check each chat to see if participants match
 	for _, doc := range docs {
 		var chat entity.Chat
 		if err := doc.DataTo(&chat); err != nil {
 			continue // Skip malformed documents
 		}
-		
+
 		// Sort chat participants for comparison
 		chatParticipants := make([]string, len(chat.Participants))
 		copy(chatParticipants, chat.Participants)
 		sort.Strings(chatParticipants)
-		
+
 		// Check if participants match exactly
 		if len(chatParticipants) == len(participants) {
 			match := true
@@ -305,19 +300,19 @@ func (r *firestoreChatRepository) GetGroupChatByProductAndParticipants(ctx conte
 			}
 		}
 	}
-	
+
 	return nil, errors.NotFound("Group chat not found", nil)
 }
 
 // New: ListAdminUsers - Get list of admin users for middleman selection
 func (r *firestoreChatRepository) ListAdminUsers(ctx context.Context) ([]*entity.User, error) {
 	query := r.client.Collection("users").Where("role", "==", "admin")
-	
+
 	docs, err := query.Documents(ctx).GetAll()
 	if err != nil {
 		return nil, errors.Internal("Failed to query admin users", err)
 	}
-	
+
 	var admins []*entity.User
 	for _, doc := range docs {
 		var user entity.User
@@ -327,6 +322,6 @@ func (r *firestoreChatRepository) ListAdminUsers(ctx context.Context) ([]*entity
 		user.ID = doc.Ref.ID
 		admins = append(admins, &user)
 	}
-	
+
 	return admins, nil
 }

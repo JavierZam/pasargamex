@@ -15,14 +15,14 @@ type ChatRepository interface {
 	// Message methods
 	CreateMessage(ctx context.Context, message *entity.Message) error
 	GetMessagesByChat(ctx context.Context, chatID string, limit, offset int) ([]*entity.Message, int64, error)
-	UpdateMessageReadStatus(ctx context.Context, messageID string, userID string) error
+	UpdateMessageReadStatus(ctx context.Context, chatID, messageID string, userID string) error
 
 	// New methods for advanced chat features
 	GetChatByTransactionID(ctx context.Context, transactionID string) (*entity.Chat, error) // New
 	GetMessageByID(ctx context.Context, chatID, messageID string) (*entity.Message, error)  // New
 	UpdateMessage(ctx context.Context, chatID string, message *entity.Message) error        // New
-	
+
 	// New methods for group chat functionality
 	GetGroupChatByProductAndParticipants(ctx context.Context, productID string, participants []string) (*entity.Chat, error) // New
-	ListAdminUsers(ctx context.Context) ([]*entity.User, error) // New for middleman selection
+	ListAdminUsers(ctx context.Context) ([]*entity.User, error)                                                              // New for middleman selection
 }

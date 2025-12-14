@@ -338,3 +338,25 @@ func (f *FirebaseAuthClient) GenerateDevTokenPair(ctx context.Context, email str
 
 	return result.IDToken, result.RefreshToken, nil
 }
+
+// GetUserProfile gets Firebase Auth user profile data including OAuth profile info
+func (f *FirebaseAuthClient) GetUserProfile(ctx context.Context, uid string) (*auth.UserRecord, error) {
+	user, err := f.client.GetUser(ctx, uid)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user profile: %v", err)
+	}
+	return user, nil
+}
+
+// CreateOrUpdateUserFromFirebase creates or updates user with Firebase profile data
+func (f *FirebaseAuthClient) CreateOrUpdateUserFromFirebase(ctx context.Context, uid string) (*auth.UserRecord, error) {
+	user, err := f.client.GetUser(ctx, uid)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Firebase user: %v", err)
+	}
+	
+	log.Printf("Firebase user profile - UID: %s, Email: %s, DisplayName: %s, PhotoURL: %s", 
+		user.UID, user.Email, user.DisplayName, user.PhotoURL)
+	
+	return user, nil
+}

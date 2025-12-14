@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"strings"
@@ -203,8 +204,14 @@ func (h *WebSocketHandler) HandleWebSocket(c echo.Context) error {
 
 			// Process other messages only if authenticated
 			if authenticated {
-				// Check rate limit for user
-				if !h.checkRateLimit(userID) {
+				// Only rate limit messages that could be spammy (typing, actual chat messages)
+				// Exclude navigation messages like join/leave room, mark read, ping/pong
+				isRateLimitedMessageType := message.Type == "send_message" ||
+					message.Type == "typing_start" ||
+					message.Type == "typing_stop" ||
+					message.Type == "typing"
+
+				if isRateLimitedMessageType && !h.checkRateLimit(userID) {
 					response := WSMessage{
 						Type: "rate_limit_exceeded",
 						Data: map[string]interface{}{
@@ -215,17 +222,18 @@ func (h *WebSocketHandler) HandleWebSocket(c echo.Context) error {
 					continue
 				}
 
+				// Convert raw message to bytes and use the message handler
+				messageBytes, err := json.Marshal(message)
+				if err != nil {
+					log.Printf("WebSocket: Failed to marshal message for handling: %v", err)
+					continue
+				}
+
+				// Use the dedicated message handler which handles most messages including ping
+				h.wsManager.HandleClientMessage(client, messageBytes)
+
+				// Handle additional cases that need special processing with usecase layer
 				switch message.Type {
-				case "test_message":
-					// Echo back the message as confirmation
-					response := WSMessage{
-						Type: "message_received",
-						Data: map[string]interface{}{
-							"original_message": message,
-							"timestamp":        time.Now().Format(time.RFC3339),
-						},
-					}
-					conn.WriteJSON(response)
 				case "typing_start":
 					if message.ChatID != "" {
 						h.chatUseCase.HandleTypingEvent(context.Background(), client.UserID, message.ChatID, true)
@@ -237,13 +245,17 @@ func (h *WebSocketHandler) HandleWebSocket(c echo.Context) error {
 				case "join_chat_room":
 					if message.ChatID != "" {
 						h.wsManager.SetClientActiveChatRoom(client.UserID, message.ChatID)
-						// Optionally, notify others in the room about presence
+						// Add client to chat room for presence broadcasts
+						h.wsManager.AddClientToChatRoom(message.ChatID, client.UserID)
+						// Notify others in the room about presence
 						h.chatUseCase.HandleUserPresence(context.Background(), client.UserID, message.ChatID, true)
 					}
 				case "leave_chat_room":
 					if message.ChatID != "" {
 						h.wsManager.SetClientActiveChatRoom(client.UserID, "") // Clear active room
-						// Optionally, notify others about absence
+						// Remove client from chat room
+						h.wsManager.RemoveClientFromChatRoom(message.ChatID, client.UserID)
+						// Notify others about absence
 						h.chatUseCase.HandleUserPresence(context.Background(), client.UserID, message.ChatID, false)
 					}
 				case "mark_message_read":
@@ -252,17 +264,8 @@ func (h *WebSocketHandler) HandleWebSocket(c echo.Context) error {
 							h.chatUseCase.MarkMessageAsRead(context.Background(), message.ChatID, messageID, client.UserID)
 						}
 					}
-				default:
-					log.Printf("WebSocket: Unknown message type from %s: %s", client.UserID, message.Type)
-					response := WSMessage{
-						Type: "error",
-						Data: map[string]interface{}{
-							"message":       "Unknown message type",
-							"type_received": message.Type,
-						},
-					}
-					conn.WriteJSON(response)
 				}
+				// Note: ping, pong, and other basic messages are handled by HandleClientMessage
 			} else {
 				response := WSMessage{
 					Type: "error",

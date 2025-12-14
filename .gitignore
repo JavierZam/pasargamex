@@ -13,6 +13,7 @@ firebase-service-account.json
 vendor/
 tmp/
 node_modules
+.claude
 
 # Binary files
 pasargamex

@@ -4,18 +4,22 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"firebase.google.com/go/v4/auth"
 	"github.com/labstack/echo/v4"
+	"pasargamex/internal/domain/repository"
 )
 
 type AuthMiddleware struct {
 	authClient *auth.Client
+	userRepo   repository.UserRepository
 }
 
-func NewAuthMiddleware(authClient *auth.Client) *AuthMiddleware {
+func NewAuthMiddleware(authClient *auth.Client, userRepo repository.UserRepository) *AuthMiddleware {
 	return &AuthMiddleware{
 		authClient: authClient,
+		userRepo:   userRepo,
 	}
 }
 
@@ -41,6 +45,9 @@ func (m *AuthMiddleware) Authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 
 		c.Set("uid", token.UID)
 
+		// Update user's last_seen timestamp on API activity
+		go m.updateUserLastSeen(c.Request().Context(), token.UID)
+
 		return next(c)
 	}
 }
@@ -53,6 +60,39 @@ func (m *AuthMiddleware) GetUIDFromToken(ctx context.Context, token string) (str
 	}
 
 	return firebaseToken.UID, nil
+}
+
+// updateUserLastSeen updates user's last_seen timestamp and online status
+func (m *AuthMiddleware) updateUserLastSeen(ctx context.Context, userID string) {
+	if m.userRepo == nil {
+		return // Skip if no user repository
+	}
+	
+	user, err := m.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		// Log error but don't fail the request for this
+		// log.Printf("Auth: Failed to get user %s for last_seen update: %v", userID, err)
+		return
+	}
+	
+	now := time.Now()
+	user.LastSeen = now
+	user.OnlineStatus = "online"
+	user.UpdatedAt = now
+	
+	// Fix any users with zero-value last_seen (from before the update)
+	if user.LastSeen.IsZero() || user.LastSeen.Year() == 1 {
+		user.LastSeen = now
+	}
+	if user.OnlineStatus == "" {
+		user.OnlineStatus = "online"
+	}
+	
+	if err := m.userRepo.Update(ctx, user); err != nil {
+		// Log error but don't fail the request for this
+		// log.Printf("Auth: Failed to update last_seen for user %s: %v", userID, err)
+		return
+	}
 }
 
 // RequireAuth middleware for Gorilla Mux

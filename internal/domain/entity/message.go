@@ -8,6 +8,7 @@ type Message struct {
 	SenderID      string                 `json:"sender_id" firestore:"senderId"`
 	Content       string                 `json:"content" firestore:"content"`
 	Type          string                 `json:"type" firestore:"type"` // "text", "image", "system", "offer"
+	Status        string                 `json:"status" firestore:"status"` // "sent", "delivered", "read"
 	Metadata      map[string]interface{} `json:"metadata,omitempty" firestore:"metadata,omitempty"`
 	AttachmentURL  string   `json:"attachment_url,omitempty" firestore:"attachmentUrl,omitempty"`   // Deprecated: use AttachmentURLs for multiple images
 	AttachmentURLs []string `json:"attachment_urls,omitempty" firestore:"attachmentUrls,omitempty"` // New: Multiple attachments support

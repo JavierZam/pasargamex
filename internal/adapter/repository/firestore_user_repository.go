@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -13,12 +14,17 @@ import (
 )
 
 type firestoreUserRepository struct {
-	client *firestore.Client
+	client           *firestore.Client
+	updateThrottle   map[string]time.Time
+	updateMutex      sync.RWMutex
+	throttleInterval time.Duration
 }
 
 func NewFirestoreUserRepository(client *firestore.Client) repository.UserRepository {
 	return &firestoreUserRepository{
-		client: client,
+		client:           client,
+		updateThrottle:   make(map[string]time.Time),
+		throttleInterval: 5 * time.Second, // Max 1 update per 5 seconds per user
 	}
 }
 
@@ -58,6 +64,17 @@ func (r *firestoreUserRepository) GetByEmail(ctx context.Context, email string) 
 }
 
 func (r *firestoreUserRepository) Update(ctx context.Context, user *entity.User) error {
+	// Check if we recently updated this user (throttle to prevent excessive writes)
+	r.updateMutex.RLock()
+	lastUpdate, exists := r.updateThrottle[user.ID]
+	r.updateMutex.RUnlock()
+
+	if exists && time.Since(lastUpdate) < r.throttleInterval {
+		log.Printf("⏸️ Skipping user update for %s (throttled, last update %v ago)",
+			user.ID, time.Since(lastUpdate))
+		return nil // Skip update silently
+	}
+
 	log.Printf("Updating user in Firestore, ID: %s", user.ID)
 
 	updateData := map[string]interface{}{
@@ -72,6 +89,13 @@ func (r *firestoreUserRepository) Update(ctx context.Context, user *entity.User)
 		"idNumber":           user.IdNumber,
 		"idCardImage":        user.IdCardImage,
 		"verificationStatus": user.VerificationStatus,
+
+		// Online presence fields
+		"lastSeen":     user.LastSeen,
+		"onlineStatus": user.OnlineStatus,
+		"avatarURL":    user.AvatarURL,
+		"photoURL":     user.PhotoURL,
+		"provider":     user.Provider,
 	}
 
 	cleanUpdateData := make(map[string]interface{})
@@ -88,8 +112,6 @@ func (r *firestoreUserRepository) Update(ctx context.Context, user *entity.User)
 		cleanUpdateData[key] = value
 	}
 
-	log.Printf("Update data: %+v", cleanUpdateData)
-
 	_, err := r.client.Collection("users").Doc(user.ID).Set(ctx, cleanUpdateData, firestore.MergeAll)
 
 	if err != nil {
@@ -97,8 +119,30 @@ func (r *firestoreUserRepository) Update(ctx context.Context, user *entity.User)
 		return err
 	}
 
-	log.Printf("User updated successfully in Firestore")
+	log.Printf("✅ User updated successfully in Firestore")
+
+	// Update throttle timestamp
+	r.updateMutex.Lock()
+	r.updateThrottle[user.ID] = time.Now()
+	r.updateMutex.Unlock()
+
+	// Cleanup old entries periodically (prevent memory leak)
+	go r.cleanupThrottleMap()
+
 	return nil
+}
+
+// cleanupThrottleMap removes old entries to prevent memory leak
+func (r *firestoreUserRepository) cleanupThrottleMap() {
+	r.updateMutex.Lock()
+	defer r.updateMutex.Unlock()
+
+	cutoff := time.Now().Add(-10 * time.Minute)
+	for userID, timestamp := range r.updateThrottle {
+		if timestamp.Before(cutoff) {
+			delete(r.updateThrottle, userID)
+		}
+	}
 }
 
 func (r *firestoreUserRepository) Delete(ctx context.Context, id string) error {

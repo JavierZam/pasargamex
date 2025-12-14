@@ -119,7 +119,7 @@ func main() {
 
 	firebaseAuthClient := firebase.NewFirebaseAuthClient(authClient, cfg.FirebaseApiKey)
 
-	wsManager := websocket.NewManager()
+	wsManager := websocket.NewManager(userRepo)
 	wsManager.Start(ctx)
 
 	handler.SetupFileHandler(storageClient, fileMetadataRepo, productRepo)
@@ -174,7 +174,7 @@ func main() {
 
 	e.Validator = api.NewValidator()
 
-	authMiddleware := apimiddleware.NewAuthMiddleware(authClient)
+	authMiddleware := apimiddleware.NewAuthMiddleware(authClient, userRepo)
 	adminMiddleware := apimiddleware.NewAdminMiddleware(userRepo)
 
 	chatHandler := handler.NewChatHandler(chatUseCase)

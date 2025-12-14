@@ -25,6 +25,13 @@ type User struct {
 	BuyerRating       float64 `json:"buyer_rating,omitempty" firestore:"buyerRating,omitempty"`
 	BuyerReviewCount  int     `json:"buyer_review_count,omitempty" firestore:"buyerReviewCount,omitempty"`
 
+	// Online presence and profile fields
+	AvatarURL    string    `json:"avatar_url,omitempty" firestore:"avatarURL,omitempty"`
+	PhotoURL     string    `json:"photo_url,omitempty" firestore:"photoURL,omitempty"`
+	LastSeen     time.Time `json:"last_seen" firestore:"lastSeen"`
+	OnlineStatus string    `json:"online_status" firestore:"onlineStatus"`
+	Provider     string    `json:"provider,omitempty" firestore:"provider,omitempty"`
+
 	CreatedAt time.Time `json:"created_at" firestore:"createdAt"`
 	UpdatedAt time.Time `json:"updated_at" firestore:"updatedAt"`
 }

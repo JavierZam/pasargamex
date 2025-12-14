@@ -92,8 +92,8 @@ func (rl *RateLimiter) Allow(userID, action string) (bool, time.Duration) {
 			// Create bucket based on action type
 			switch action {
 			case "send_message":
-				// Allow 10 messages per minute (1 token per 6 seconds)
-				bucket = NewTokenBucket(10, 1, 6*time.Second)
+				// Allow 20 messages per minute (1 token per 3 seconds)
+				bucket = NewTokenBucket(20, 1, 3*time.Second)
 			case "create_chat":
 				// Allow 5 chat creations per hour (1 token per 12 minutes)
 				bucket = NewTokenBucket(5, 1, 12*time.Minute)

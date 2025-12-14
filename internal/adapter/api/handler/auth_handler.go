@@ -29,10 +29,15 @@ type registerRequest struct {
 }
 
 type userResponse struct {
-	ID       string `json:"id"`
-	Email    string `json:"email"`
-	Username string `json:"username"`
-	Phone    string `json:"phone,omitempty"`
+	ID           string `json:"id"`
+	Email        string `json:"email"`
+	Username     string `json:"username"`
+	Phone        string `json:"phone,omitempty"`
+	AvatarURL    string `json:"avatar_url,omitempty"`
+	PhotoURL     string `json:"photo_url,omitempty"`
+	LastSeen     string `json:"last_seen"`
+	OnlineStatus string `json:"online_status"`
+	Provider     string `json:"provider,omitempty"`
 }
 
 type authResponse struct {
@@ -64,10 +69,15 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		Token:        result.Token,
 		RefreshToken: result.RefreshToken,
 		User: userResponse{
-			ID:       result.User.ID,
-			Email:    result.User.Email,
-			Username: result.User.Username,
-			Phone:    result.User.Phone,
+			ID:           result.User.ID,
+			Email:        result.User.Email,
+			Username:     result.User.Username,
+			Phone:        result.User.Phone,
+			AvatarURL:    result.User.AvatarURL,
+			PhotoURL:     result.User.PhotoURL,
+			LastSeen:     result.User.LastSeen.Format("2006-01-02T15:04:05Z07:00"),
+			OnlineStatus: result.User.OnlineStatus,
+			Provider:     result.User.Provider,
 		},
 	})
 }
@@ -98,10 +108,15 @@ func (h *AuthHandler) Register(c echo.Context) error {
 		Token:        result.Token,
 		RefreshToken: result.RefreshToken,
 		User: userResponse{
-			ID:       result.User.ID,
-			Email:    result.User.Email,
-			Username: result.User.Username,
-			Phone:    result.User.Phone,
+			ID:           result.User.ID,
+			Email:        result.User.Email,
+			Username:     result.User.Username,
+			Phone:        result.User.Phone,
+			AvatarURL:    result.User.AvatarURL,
+			PhotoURL:     result.User.PhotoURL,
+			LastSeen:     result.User.LastSeen.Format("2006-01-02T15:04:05Z07:00"),
+			OnlineStatus: result.User.OnlineStatus,
+			Provider:     result.User.Provider,
 		},
 	})
 }
@@ -129,10 +144,15 @@ func (h *AuthHandler) RefreshToken(c echo.Context) error {
 		Token:        result.Token,
 		RefreshToken: result.RefreshToken,
 		User: userResponse{
-			ID:       result.User.ID,
-			Email:    result.User.Email,
-			Username: result.User.Username,
-			Phone:    result.User.Phone,
+			ID:           result.User.ID,
+			Email:        result.User.Email,
+			Username:     result.User.Username,
+			Phone:        result.User.Phone,
+			AvatarURL:    result.User.AvatarURL,
+			PhotoURL:     result.User.PhotoURL,
+			LastSeen:     result.User.LastSeen.Format("2006-01-02T15:04:05Z07:00"),
+			OnlineStatus: result.User.OnlineStatus,
+			Provider:     result.User.Provider,
 		},
 	})
 }
@@ -156,5 +176,44 @@ func (h *AuthHandler) Logout(c echo.Context) error {
 
 	return response.Success(c, map[string]string{
 		"message": "Successfully logged out",
+	})
+}
+
+// OAuthLogin handles OAuth authentication (Google, etc.) and ensures user profile is up-to-date
+func (h *AuthHandler) OAuthLogin(c echo.Context) error {
+	// Get the Firebase token from header
+	authHeader := c.Request().Header.Get("Authorization")
+	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		return response.Error(c, errors.Unauthorized("Authorization header required", nil))
+	}
+	
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	
+	// Verify token and get UID
+	uid, err := h.authUseCase.VerifyToken(c.Request().Context(), token)
+	if err != nil {
+		return response.Error(c, errors.Unauthorized("Invalid token", err))
+	}
+	
+	// Create or update user from Firebase OAuth profile
+	result, err := h.authUseCase.CreateOrUpdateUserFromFirebaseOAuth(c.Request().Context(), uid)
+	if err != nil {
+		return response.Error(c, err)
+	}
+	
+	return response.Success(c, authResponse{
+		Token:        result.Token,
+		RefreshToken: result.RefreshToken,
+		User: userResponse{
+			ID:           result.User.ID,
+			Email:        result.User.Email,
+			Username:     result.User.Username,
+			Phone:        result.User.Phone,
+			AvatarURL:    result.User.AvatarURL,
+			PhotoURL:     result.User.PhotoURL,
+			LastSeen:     result.User.LastSeen.Format("2006-01-02T15:04:05Z07:00"),
+			OnlineStatus: result.User.OnlineStatus,
+			Provider:     result.User.Provider,
+		},
 	})
 }

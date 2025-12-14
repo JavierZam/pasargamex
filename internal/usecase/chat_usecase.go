@@ -32,7 +32,7 @@ func NewChatUseCase(
 ) *ChatUseCase {
 	rateLimiter := ratelimit.NewRateLimiter()
 	rateLimiter.StartCleanupRoutine() // Start cleanup routine
-	
+
 	return &ChatUseCase{
 		chatRepo:    chatRepo,
 		userRepo:    userRepo,
@@ -204,7 +204,7 @@ func (uc *ChatUseCase) CreateChat(ctx context.Context, userID string, input Crea
 func (uc *ChatUseCase) CreateMiddlemanChat(ctx context.Context, input CreateMiddlemanChatInput) (*ChatResponse, error) {
 	// Validate that all participants are different users
 	if input.BuyerID == input.SellerID || input.BuyerID == input.MiddlemanID || input.SellerID == input.MiddlemanID {
-		log.Printf("CreateMiddlemanChat Error: Duplicate participants detected - Buyer: %s, Seller: %s, Middleman: %s", 
+		log.Printf("CreateMiddlemanChat Error: Duplicate participants detected - Buyer: %s, Seller: %s, Middleman: %s",
 			input.BuyerID, input.SellerID, input.MiddlemanID)
 		return nil, errors.BadRequest("All participants must be different users", nil)
 	}
@@ -427,13 +427,13 @@ func (uc *ChatUseCase) CreateSellerGroupChat(ctx context.Context, sellerID strin
 // Helper function to notify participants about new group chat
 func (uc *ChatUseCase) notifyGroupChatCreated(ctx context.Context, chat *entity.Chat, initiatedBy, initiatorName, productTitle string) {
 	notification := map[string]interface{}{
-		"type":         "group_chat_created",
-		"chat_id":      chat.ID,
-		"product_id":   chat.ProductID,
+		"type":          "group_chat_created",
+		"chat_id":       chat.ID,
+		"product_id":    chat.ProductID,
 		"product_title": productTitle,
-		"initiated_by": initiatedBy,
-		"initiator":    initiatorName,
-		"participants": chat.Participants,
+		"initiated_by":  initiatedBy,
+		"initiator":     initiatorName,
+		"participants":  chat.Participants,
 	}
 
 	// Send WebSocket notification to all participants
@@ -569,7 +569,7 @@ func (uc *ChatUseCase) SendMessage(ctx context.Context, userID string, input Sen
 	allowed, waitTime := uc.rateLimiter.Allow(userID, "send_message")
 	if !allowed {
 		log.Printf("SendMessage Rate Limited: User %s must wait %v", userID, waitTime)
-		
+
 		// Send rate limit notification via WebSocket
 		notification := map[string]interface{}{
 			"type":      "rate_limit_exceeded",
@@ -578,7 +578,7 @@ func (uc *ChatUseCase) SendMessage(ctx context.Context, userID string, input Sen
 		}
 		notificationJSON, _ := json.Marshal(notification)
 		uc.wsManager.SendToUser(userID, notificationJSON)
-		
+
 		return nil, errors.TooManyRequests("Rate limit exceeded. Please wait before sending another message", waitTime)
 	}
 
@@ -612,10 +612,11 @@ func (uc *ChatUseCase) SendMessage(ctx context.Context, userID string, input Sen
 		SenderID:       userID,
 		Content:        input.Content,
 		Type:           input.Type,
-		AttachmentURL:  input.AttachmentURL,  // Backward compatibility
-		AttachmentURLs: attachmentURLs,       // New: Multiple attachments
-		Metadata:       input.Metadata,       // New: Save metadata
-		ProductID:      input.ProductID,      // Save ProductID in the message
+		Status:         "sent",              // Initial status is 'sent'
+		AttachmentURL:  input.AttachmentURL, // Backward compatibility
+		AttachmentURLs: attachmentURLs,      // New: Multiple attachments
+		Metadata:       input.Metadata,      // New: Save metadata
+		ProductID:      input.ProductID,     // Save ProductID in the message
 		ReadBy:         []string{userID},
 		CreatedAt:      time.Now(),
 	}
@@ -653,9 +654,30 @@ func (uc *ChatUseCase) SendMessage(ctx context.Context, userID string, input Sen
 	}
 
 	notificationJSON, _ := json.Marshal(notification)
+
+	// Use SendToChatRoom to broadcast to all connected participants in the chat room
+	// This is for users who have the chat room open
+	log.Printf("SendMessage: Broadcasting new message to chat room %s (excluding sender %s)", input.ChatID, userID)
+	uc.wsManager.SendToChatRoom(input.ChatID, notificationJSON, userID)
+
+	// ALSO send via SendToUser for chat list updates
+	// This ensures users who are on the chat list page (not in the room) also get the update
+	chatListUpdate := map[string]interface{}{
+		"type":            "chat_list_update",
+		"chat_id":         input.ChatID,
+		"last_message":    message.Content,
+		"last_message_at": message.CreatedAt.Format(time.RFC3339),
+		"sender_id":       userID,
+		"sender_name":     sender.Username,
+		"message_type":    message.Type,
+	}
+	chatListUpdateJSON, _ := json.Marshal(chatListUpdate)
+
+	log.Printf("SendMessage: Sending chat_list_update to %d participants (excluding sender %s)", len(chat.Participants)-1, userID)
 	for _, participantID := range chat.Participants {
 		if participantID != userID {
-			uc.wsManager.SendToUser(participantID, notificationJSON)
+			log.Printf("SendMessage: Sending chat_list_update to participant %s", participantID)
+			uc.wsManager.SendToUser(participantID, chatListUpdateJSON)
 		}
 	}
 
@@ -676,7 +698,8 @@ func (uc *ChatUseCase) SendSystemMessage(ctx context.Context, chatID, content, s
 		ChatID:    chatID,
 		SenderID:  systemUserID, // Sender is "system"
 		Content:   content,
-		Type:      "system", // Type is "system"
+		Type:      "system",    // Type is "system"
+		Status:    "delivered", // System messages are automatically delivered
 		Metadata:  metadata,
 		ReadBy:    []string{}, // System messages are not "read" by users in the same way
 		CreatedAt: time.Now(),
@@ -707,9 +730,10 @@ func (uc *ChatUseCase) SendSystemMessage(ctx context.Context, chatID, content, s
 		"sender":  map[string]string{"id": systemUserID, "username": "System"}, // Placeholder sender info
 	}
 	notificationJSON, _ := json.Marshal(notification)
-	for _, participantID := range chat.Participants {
-		uc.wsManager.SendToUser(participantID, notificationJSON)
-	}
+
+	// Use SendToChatRoom to broadcast to all connected participants
+	log.Printf("SendSystemMessage: Broadcasting to chat room %s", chatID)
+	uc.wsManager.SendToChatRoom(chatID, notificationJSON, "")
 
 	return &MessageResponse{Message: message}, nil
 }
@@ -717,14 +741,14 @@ func (uc *ChatUseCase) SendSystemMessage(ctx context.Context, chatID, content, s
 // New: AcceptOffer updates the status of an offer message
 func (uc *ChatUseCase) AcceptOffer(ctx context.Context, chatID, messageID, userID string) error {
 	log.Printf("DEBUG: AcceptOffer called - chatID: %s, messageID: %s, userID: %s", chatID, messageID, userID)
-	
+
 	// 1. Get the message
 	message, err := uc.chatRepo.GetMessageByID(ctx, chatID, messageID)
 	if err != nil {
 		log.Printf("ERROR: Failed to get message %s: %v", messageID, err)
 		return errors.NotFound("Offer message not found", err)
 	}
-	
+
 	log.Printf("DEBUG: Found message - Type: %s, Metadata: %+v", message.Type, message.Metadata)
 
 	// 2. Validate it's an offer message
@@ -769,36 +793,36 @@ func (uc *ChatUseCase) AcceptOffer(ctx context.Context, chatID, messageID, userI
 
 	// 6. Update product price if offer contains a new price and product ID
 	log.Printf("DEBUG: Checking for price update in metadata: %+v", message.Metadata)
-	
+
 	// Try both "offered_price" and "price" for backward compatibility
 	var newPrice float64
 	var priceExists bool
-	
+
 	if val, exists := message.Metadata["offered_price"].(float64); exists {
 		newPrice, priceExists = val, true
 	} else if val, exists := message.Metadata["price"].(float64); exists {
 		newPrice, priceExists = val, true
 	}
-	
+
 	if priceExists {
 		log.Printf("DEBUG: Found offered_price: %.0f", newPrice)
-		
+
 		if productID, productIDExists := message.Metadata["product_id"].(string); productIDExists {
 			log.Printf("DEBUG: Found product_id: %s", productID)
-			
+
 			// Get the product
 			product, err := uc.productRepo.GetByID(ctx, productID)
 			if err == nil {
 				// Store original price for transaction history
 				originalPrice := product.Price
 				message.Metadata["original_price"] = originalPrice
-				
+
 				log.Printf("DEBUG: Updating product price from %.0f to %.0f IDR", originalPrice, newPrice)
-				
+
 				// Update product with negotiated price
 				product.Price = newPrice
 				product.UpdatedAt = time.Now()
-				
+
 				if updateErr := uc.productRepo.Update(ctx, product); updateErr != nil {
 					log.Printf("WARNING: Failed to update product price after offer acceptance: %v", updateErr)
 					// Don't fail the entire operation, just log the warning
@@ -820,7 +844,7 @@ func (uc *ChatUseCase) AcceptOffer(ctx context.Context, chatID, messageID, userI
 	if user, uErr := uc.userRepo.GetByID(ctx, userID); uErr == nil {
 		acceptedByUsername = user.Username
 	}
-	
+
 	// Enhanced system message with price information
 	systemMessage := acceptedByUsername + " accepted the offer."
 	if newPrice, exists := message.Metadata["offered_price"].(float64); exists {
@@ -952,7 +976,7 @@ func (uc *ChatUseCase) GetChatsByType(ctx context.Context, userID string, chatTy
 	}
 
 	var filteredChats []*entity.Chat
-	
+
 	// Filter chats by type
 	for _, chat := range chats {
 		if chatType == "direct" && chat.Type == "direct" {
@@ -1152,7 +1176,7 @@ func (uc *ChatUseCase) MarkMessageAsRead(ctx context.Context, chatID, messageID,
 		return
 	}
 
-	err = uc.chatRepo.UpdateMessageReadStatus(ctx, messageID, userID)
+	err = uc.chatRepo.UpdateMessageReadStatus(ctx, chatID, messageID, userID)
 	if err != nil {
 		log.Printf("MarkMessageAsRead Error: Failed to update message %s read status for user %s: %v", messageID, userID, err)
 		return
@@ -1196,6 +1220,7 @@ func (uc *ChatUseCase) HandleUserPresence(ctx context.Context, userID, chatID st
 	notificationJSON, _ := json.Marshal(notification)
 	uc.wsManager.SendToChatRoom(chatID, notificationJSON, userID)
 }
+
 // New: ListUsers - Get all users for buyer/seller selection
 func (uc *ChatUseCase) ListUsers(ctx context.Context) ([]*entity.User, error) {
 	// Get admin users first as a fallback (since we know this method works)
@@ -1203,13 +1228,13 @@ func (uc *ChatUseCase) ListUsers(ctx context.Context) ([]*entity.User, error) {
 	if len(users) == 0 {
 		return nil, errors.Internal("No users found", nil)
 	}
-	
+
 	// Convert []*entity.User to match expected return type
 	result := make([]*entity.User, len(users))
 	for i, user := range users {
 		result[i] = user
 	}
-	
+
 	return result, nil
 }
 
@@ -1219,7 +1244,7 @@ func (uc *ChatUseCase) GetUserProducts(ctx context.Context, userID string) ([]*e
 	if err != nil {
 		return nil, errors.Internal("Failed to get user products", err)
 	}
-	
+
 	return products, nil
 }
 
@@ -1296,7 +1321,7 @@ func (uc *ChatUseCase) CreateTransactionChat(ctx context.Context, creatorID stri
 	// Send initial system message
 	initialMessage := input.InitialMessage
 	if initialMessage == "" {
-		initialMessage = fmt.Sprintf("Transaction chat created for product: %s\nBuyer: %s\nSeller: %s\nMiddleman: %s", 
+		initialMessage = fmt.Sprintf("Transaction chat created for product: %s\nBuyer: %s\nSeller: %s\nMiddleman: %s",
 			product.Title, buyer.Username, seller.Username, middleman.Username)
 	}
 
@@ -1305,6 +1330,7 @@ func (uc *ChatUseCase) CreateTransactionChat(ctx context.Context, creatorID stri
 		SenderID:  "system",
 		Content:   initialMessage,
 		Type:      "system",
+		Status:    "delivered", // System messages are automatically delivered
 		ProductID: input.ProductID,
 		Metadata: map[string]interface{}{
 			"type":         "transaction_chat_created",
@@ -1322,13 +1348,13 @@ func (uc *ChatUseCase) CreateTransactionChat(ctx context.Context, creatorID stri
 
 	// Send real-time notifications to all participants
 	notification := map[string]interface{}{
-		"type":       "transaction_chat_created",
-		"chat_id":    chat.ID,
-		"product":    product.Title,
-		"buyer":      buyer.Username,
-		"seller":     seller.Username,
-		"middleman":  middleman.Username,
-		"creator":    creatorID,
+		"type":      "transaction_chat_created",
+		"chat_id":   chat.ID,
+		"product":   product.Title,
+		"buyer":     buyer.Username,
+		"seller":    seller.Username,
+		"middleman": middleman.Username,
+		"creator":   creatorID,
 	}
 
 	notificationJSON, _ := json.Marshal(notification)
@@ -1344,13 +1370,13 @@ func (uc *ChatUseCase) CreateTransactionChat(ctx context.Context, creatorID stri
 // Helper function to format price with thousand separators
 func formatPrice(price float64) string {
 	str := strconv.FormatFloat(price, 'f', 0, 64)
-	
+
 	// Add thousand separators
 	n := len(str)
 	if n <= 3 {
 		return str
 	}
-	
+
 	var result strings.Builder
 	for i, digit := range str {
 		if i > 0 && (n-i)%3 == 0 {
@@ -1358,7 +1384,7 @@ func formatPrice(price float64) string {
 		}
 		result.WriteRune(digit)
 	}
-	
+
 	return result.String()
 }
 
@@ -1396,11 +1422,11 @@ func (uc *ChatUseCase) CreateChatByProduct(ctx context.Context, buyerID string, 
 	existingChat, err := uc.findExistingChat(ctx, buyerID, product.SellerID)
 	if err == nil && existingChat != nil {
 		chatToReturn = existingChat
-		
+
 		// Update existing chat with new product ID (always set to latest product being discussed)
 		chatToReturn.ProductID = input.ProductID
 		chatToReturn.UpdatedAt = time.Now()
-		
+
 		if err := uc.chatRepo.Update(ctx, chatToReturn); err != nil {
 			log.Printf("CreateChatByProduct Warning: Failed to update chat with new product ID: %v", err)
 		} else {
@@ -1452,9 +1478,9 @@ func (uc *ChatUseCase) CreateChatByProduct(ctx context.Context, buyerID string, 
 			"seller_id":       product.SellerID,
 		},
 		"buyer_info": map[string]interface{}{
-			"buyer_id":  buyerID,
-			"username":  buyer.Username,
-			"email":     buyer.Email,
+			"buyer_id": buyerID,
+			"username": buyer.Username,
+			"email":    buyer.Email,
 		},
 	}
 

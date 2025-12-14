@@ -1,6 +1,9 @@
 package usecase
 
-import "context"
+import (
+	"context"
+	"firebase.google.com/go/v4/auth"
+)
 
 type FirebaseAuthClient interface {
 	CreateUser(ctx context.Context, email, password, displayName string) (string, error)
@@ -11,4 +14,6 @@ type FirebaseAuthClient interface {
 	TestConnection(ctx context.Context) error
 	SignInWithEmailPasswordWithRefresh(email, password string) (string, string, error)
 	RefreshIdToken(refreshToken string) (string, string, error)
+	GetUserProfile(ctx context.Context, uid string) (*auth.UserRecord, error)
+	CreateOrUpdateUserFromFirebase(ctx context.Context, uid string) (*auth.UserRecord, error)
 }
