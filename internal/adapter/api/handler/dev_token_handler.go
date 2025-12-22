@@ -81,7 +81,7 @@ func (h *DevTokenHandler) GenerateUserToken(c echo.Context) error {
 		"token":         token,
 		"refresh_token": refreshToken,
 		"expires_at":    expiryTime.Format(time.RFC3339),
-		"expires_in":    expiryTime.Sub(time.Now()).String(),
+		"expires_in":    time.Until(expiryTime).String(),
 		"user": map[string]interface{}{
 			"id":       user.ID,
 			"email":    user.Email,
@@ -135,7 +135,7 @@ func (h *DevTokenHandler) GenerateAdminToken(c echo.Context) error {
 		"token":         token,
 		"refresh_token": refreshToken,
 		"expires_at":    expiryTime.Format(time.RFC3339),
-		"expires_in":    expiryTime.Sub(time.Now()).String(),
+		"expires_in":    time.Until(expiryTime).String(),
 		"user": map[string]interface{}{
 			"id":       user.ID,
 			"email":    user.Email,

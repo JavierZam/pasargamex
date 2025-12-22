@@ -1231,9 +1231,7 @@ func (uc *ChatUseCase) ListUsers(ctx context.Context) ([]*entity.User, error) {
 
 	// Convert []*entity.User to match expected return type
 	result := make([]*entity.User, len(users))
-	for i, user := range users {
-		result[i] = user
-	}
+	copy(result, users)
 
 	return result, nil
 }
